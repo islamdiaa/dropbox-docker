@@ -1,16 +1,27 @@
-# Security Policy
+# Security
 
-## Supported Versions
+## Reporting vulnerabilities
 
-Please always use the latest version of this container. Here is an overview
-of supported versions:
+If you find a security issue, please open a [GitHub issue](https://github.com/islamdiaa/dropbox-docker/issues). For sensitive disclosures, reach out privately before posting publicly.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| 1.8.x   | :white_check_mark: |
-| < 1.8   | :x:                |
+## Supported versions
 
-## Reporting a Vulnerability
+Use the latest image. Older tags are not patched.
 
-Please report any vulnerabilities as a [GitHub issue](https://github.com/otherguy/docker-dropbox/issues) 
-publicly. I will do my best to respond and patch vulnerabilities within 72 hours.
+| Tag | Supported |
+|---|---|
+| `latest` | Yes |
+| Dated tags (e.g., `20260222`) | Best-effort |
+| Older tags | No |
+
+## What this project controls
+
+This container downloads and runs the official Dropbox daemon binary from `dropbox.com`. We do not modify the daemon itself. Security of the Dropbox sync protocol and client is Dropbox's responsibility.
+
+What we control:
+- The base image and its system packages
+- The entrypoint script (process management, permissions, signal handling)
+- The monitoring script (Prometheus metrics)
+- The CI pipeline (linting, scanning, publishing)
+
+The CI pipeline runs Trivy vulnerability scans on every build.

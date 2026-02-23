@@ -1,0 +1,35 @@
+# docker-compose.yml — Dropbox Docker
+# https://github.com/islamdiaa/dropbox-docker
+
+services:
+  dropbox:
+    image: islamdiaa/dropbox-docker:latest
+    container_name: dropbox
+    restart: unless-stopped
+    volumes:
+      # Persistent config (account link, settings, daemon state)
+      - dropbox-config:/opt/dropbox
+      # Your actual Dropbox sync folder — change this path
+      - /srv/dropbox:/opt/dropbox/Dropbox
+    environment:
+      TZ: Europe/London
+      DROPBOX_UID: "1000"
+      DROPBOX_GID: "1000"
+      # Recommended for large accounts (500K+ files):
+      # SKIP_SET_PERMISSIONS: "true"        # default, skips slow chown -R
+      # DROPBOX_STARTUP_TIMEOUT: "600"      # more time for initial indexing
+      # POLLING_INTERVAL: "30"              # less frequent status polling
+    ports:
+      - "17500:17500"  # LAN sync discovery (optional)
+    # Uncomment for large accounts:
+    # deploy:
+    #   resources:
+    #     limits:
+    #       memory: 4G
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
+
+volumes:
+  dropbox-config:

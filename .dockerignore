@@ -1,2 +1,11 @@
 .dropbox
 Dropbox
+.git
+.github
+.travis.yml
+*.md
+!README.md
+dropbox.gif
+.editorconfig
+renovate.json
+tests/

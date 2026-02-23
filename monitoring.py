@@ -119,6 +119,7 @@ class DropboxMonitor:
     def get_status(self, metric: Metric) -> int:
         now = time()
         if now - self.last_query_time > self.min_poll_interval_sec:
+            self.last_query_time = now
             dropbox_result = self.dropbox.query_status()
             if dropbox_result:
                 self.parse_output(dropbox_result)
@@ -161,12 +162,12 @@ class DropboxMonitor:
             try:
                 if line.startswith("Up to date"):
                     state = State.UP_TO_DATE
-                    self.num_syncing = 0
-                    self.num_downloading = 0
-                    self.num_uploading = 0
-                if line == "Dropbox isn't running!":
+                    num_syncing = 0
+                    num_downloading = 0
+                    num_uploading = 0
+                elif line == "Dropbox isn't running!":
                     state = State.NOT_RUNNING
-                else:
+                elif line:
                     # Hack: remove commas; simplifies the regex
                     line = line.replace(',', '')
 
@@ -178,18 +179,18 @@ class DropboxMonitor:
                         num_files = int(num_files_str)
                         if action == "Syncing":
                             num_syncing = num_files
-                        if action == "Downloading":
+                        elif action == "Downloading":
                             num_downloading = num_files
-                        if action == "Uploading":
+                        elif action == "Uploading":
                             num_uploading = num_files
                     elif status_match_with_file:
                         state = State.SYNCING
                         action = status_match_with_file.groups()[0]
                         if action == "Syncing":
                             num_syncing = 1
-                        if action == "Downloading":
+                        elif action == "Downloading":
                             num_downloading = 1
-                        if action == "Uploading":
+                        elif action == "Uploading":
                             num_uploading = 1
                     elif line.startswith("Starting"):
                         state = State.STARTING
@@ -205,7 +206,7 @@ class DropboxMonitor:
                 self.logger.exception("Failed to parse status line '%s'", line)
 
         self.status_enum.state(state.value)
-        if state == State.SYNCING:
+        if state in (State.SYNCING, State.UP_TO_DATE):
             self.num_syncing = num_syncing
             self.num_downloading = num_downloading
             self.num_uploading = num_uploading
