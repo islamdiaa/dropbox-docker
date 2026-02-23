@@ -76,6 +76,12 @@ if ! grep -q "telemetry.dropbox.com" /etc/hosts 2>/dev/null; then
   echo "127.0.0.1 telemetry.dropbox.com" >> /etc/hosts
 fi
 
+# Clear stale analytics caches that can grow to multiple GB and trigger
+# Rust panics ("queue size is inconsistent") in the analytics subsystem.
+rm -f /opt/dropbox/.dropbox/events/store /opt/dropbox/.dropbox/events/store1
+rm -rf /opt/dropbox/.dropbox/sentry_exceptions/* /opt/dropbox/.dropbox/ssa_events/*
+rm -f /opt/dropbox/.dropbox/metrics/store.bin
+
 # --- Update Dropbox ---
 if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
   echo "Checking for latest Dropbox version..."
