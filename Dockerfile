@@ -11,6 +11,8 @@ WORKDIR /opt/dropbox
 EXPOSE 17500
 # Prometheus metrics port
 EXPOSE 8000
+# JSON status API port
+EXPOSE 8001
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 

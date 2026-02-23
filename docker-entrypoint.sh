@@ -149,8 +149,8 @@ gosu dropbox "$@" & DROPBOX_PID="$!"
 
 # --- Start Monitoring (Optional) ---
 if [[ $(echo "${ENABLE_MONITORING:-false}" | tr '[:upper:]' '[:lower:]' | tr -d " ") == "true" ]]; then
-  echo "Starting Prometheus monitoring on port 8000..."
-  gosu dropbox python3 /monitoring.py -i "${POLLING_INTERVAL}" &
+  echo "Starting Prometheus metrics on port 8000 and status API on port 8001..."
+  gosu dropbox python3 /monitoring.py -i "${POLLING_INTERVAL}" --status-port 8001 &
   echo "Monitoring started (PID: $!)"
 fi
 

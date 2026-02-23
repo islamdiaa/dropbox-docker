@@ -1,11 +1,14 @@
 from argparse import ArgumentParser
 from enum import Enum
 from functools import partial
+from http.server import HTTPServer, BaseHTTPRequestHandler
+import json
 import logging
+import os
 import re
 import signal
 import subprocess
-from threading import Event
+from threading import Thread, Event
 from time import time
 from typing import Optional
 
@@ -54,6 +57,42 @@ class DropboxInterface:
             self.logger.exception("Failed to invoke Dropbox")
             return None
 
+    def query_account_info(self) -> Optional[dict]:
+        """Read account info from Dropbox's info.json."""
+        try:
+            info_path = "/opt/dropbox/.dropbox/info.json"
+            if os.path.exists(info_path):
+                with open(info_path) as f:
+                    return json.load(f)
+        except:
+            pass
+        return None
+
+    def query_exclude_list(self) -> Optional[list]:
+        """Get the list of excluded (selective sync) folders."""
+        try:
+            result = subprocess.run(
+                ["dropbox", "exclude", "list"], capture_output=True, text=True
+            )
+            if result.stdout:
+                lines = result.stdout.strip().splitlines()
+                # First line is header like "Excluded:"
+                return [l.strip() for l in lines[1:] if l.strip()] if len(lines) > 1 else []
+        except:
+            pass
+        return None
+
+    def query_version(self) -> Optional[str]:
+        """Read the daemon version from VERSION file."""
+        try:
+            version_path = "/opt/dropbox/bin/VERSION"
+            if os.path.exists(version_path):
+                with open(version_path) as f:
+                    return f.read().strip()
+        except:
+            pass
+        return None
+
 
 class DropboxMonitor:
     def __init__(
@@ -79,6 +118,11 @@ class DropboxMonitor:
         self.num_downloading = None  # type: Optional[int]
         self.num_uploading = None  # type: Optional[int]
         self.state = State.STARTING
+        self.raw_status = ""
+        self.last_error = None  # type: Optional[str]
+        self.last_sync_time = None  # type: Optional[float]
+        self.start_time = time()
+        self.restart_count = 0
 
         self.num_syncing_gauge = Gauge(
             "dropbox_num_syncing",
@@ -122,6 +166,7 @@ class DropboxMonitor:
             self.last_query_time = now
             dropbox_result = self.dropbox.query_status()
             if dropbox_result:
+                self.raw_status = dropbox_result.strip()
                 self.parse_output(dropbox_result)
             else:
                 self.status_enum.state(State.UNKNOWN.value)
@@ -137,6 +182,64 @@ class DropboxMonitor:
             return self.num_uploading or 0
         else:
             raise ValueError(metric)
+
+    def get_json_status(self) -> dict:
+        """Build a JSON-serializable status dict for the /status endpoint."""
+        # Trigger a refresh if stale
+        self.get_status(Metric.NUM_SYNCING)
+
+        # Account info
+        account = {}
+        info = self.dropbox.query_account_info()
+        if info:
+            personal = info.get("personal", {})
+            account = {
+                "email": personal.get("email"),
+                "display_name": personal.get("display_name"),
+                "linked": True,
+            }
+        else:
+            account = {"linked": False}
+
+        # Excluded folders
+        excluded = self.dropbox.query_exclude_list()
+
+        # Version
+        version = self.dropbox.query_version()
+
+        # Memory usage from /proc
+        memory_mb = None
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        memory_mb = int(line.split()[1]) / 1024
+                        break
+        except:
+            pass
+
+        # Uptime
+        uptime_seconds = int(time() - self.start_time)
+
+        return {
+            "status": self.state.value,
+            "raw_status": self.raw_status,
+            "sync": {
+                "syncing": self.num_syncing or 0,
+                "downloading": self.num_downloading or 0,
+                "uploading": self.num_uploading or 0,
+            },
+            "account": account,
+            "daemon": {
+                "version": version,
+                "uptime_seconds": uptime_seconds,
+                "memory_mb": round(memory_mb, 1) if memory_mb else None,
+                "restart_count": self.restart_count,
+            },
+            "last_sync": self.last_sync_time,
+            "last_error": self.last_error,
+            "excluded_folders": excluded or [],
+        }
 
     def parse_output(self, results: str) -> None:
         """
@@ -165,6 +268,7 @@ class DropboxMonitor:
                     num_syncing = 0
                     num_downloading = 0
                     num_uploading = 0
+                    self.last_sync_time = time()
                 elif line == "Dropbox isn't running!":
                     state = State.NOT_RUNNING
                 elif line:
@@ -200,11 +304,13 @@ class DropboxMonitor:
                         state = State.INDEXING
                     elif line.startswith("Can't sync"):
                         state = State.SYNC_ERROR
+                        self.last_error = line
                     else:
                         self.logger.debug("Ignoring line '%s'", line)
             except:
                 self.logger.exception("Failed to parse status line '%s'", line)
 
+        self.state = state
         self.status_enum.state(state.value)
         if state in (State.SYNCING, State.UP_TO_DATE):
             self.num_syncing = num_syncing
@@ -216,9 +322,52 @@ class DropboxMonitor:
             self.num_uploading = None
 
 
+class StatusHandler(BaseHTTPRequestHandler):
+    """HTTP handler for the /status JSON endpoint."""
+
+    monitor = None  # type: Optional[DropboxMonitor]
+
+    def do_GET(self):
+        if self.path == "/status" or self.path == "/status/":
+            data = self.monitor.get_json_status()
+            payload = json.dumps(data, indent=2)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            self.write(payload.encode())
+        elif self.path == "/health" or self.path == "/health/":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.write(b'{"ok":true}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def write(self, data: bytes):
+        try:
+            self.wfile.write(data)
+        except BrokenPipeError:
+            pass
+
+    def log_message(self, format, *args):
+        """Suppress default request logging."""
+        pass
+
+
+def start_status_server(monitor: DropboxMonitor, port: int, logger: logging.Logger):
+    """Start the JSON status HTTP server in a background thread."""
+    StatusHandler.monitor = monitor
+    server = HTTPServer(("0.0.0.0", port), StatusHandler)
+    thread = Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Started status API server on port %d", port)
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(
-        description="Runs a webserver for Prometheus that reports Dropbox status"
+        description="Runs monitoring servers for Dropbox status (Prometheus + JSON API)"
     )
     parser.add_argument(
         "-i",
@@ -227,6 +376,7 @@ if __name__ == "__main__":
         default=5,
     )
     parser.add_argument("-p", "--port", help="Prometheus port", default=8000)
+    parser.add_argument("--status-port", help="JSON status API port", default=8001)
     parser.add_argument("--log_level", default="INFO")
     parser.add_argument("--global_log_level", default="INFO")
     args = parser.parse_args()
@@ -247,6 +397,9 @@ if __name__ == "__main__":
         prom_port=args.port,
     )
     monitor.start()
+
+    # Start JSON status API
+    start_status_server(monitor, int(args.status_port), logger)
 
     exit_event = Event()
     signal.signal(signal.SIGHUP, lambda _s, _f: exit_event.set())

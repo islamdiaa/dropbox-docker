@@ -85,7 +85,7 @@ All configuration is through environment variables. None are required — defaul
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ENABLE_MONITORING` | `false` | Starts a Prometheus metrics server on port 8000. Exposes `dropbox_status`, `dropbox_num_syncing`, `dropbox_num_downloading`, and `dropbox_num_uploading`. |
+| `ENABLE_MONITORING` | `false` | Enables Prometheus metrics (port 8000) and JSON status API (port 8001). |
 
 ## Handling large accounts
 
