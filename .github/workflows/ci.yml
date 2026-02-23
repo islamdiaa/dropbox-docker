@@ -27,10 +27,15 @@ jobs:
       - name: ShellCheck entrypoint
         run: shellcheck docker-entrypoint.sh || true
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Run unit tests
         run: |
           pip install -r tests/requirements-test.txt
-          python -m pytest tests/unit/ -v --tb=short
+          pytest tests/unit/ -v --tb=short
 
   build-and-push:
     needs: lint
