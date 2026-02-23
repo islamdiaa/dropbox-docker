@@ -67,6 +67,15 @@ rm -f /opt/dropbox/.dropbox/command_socket \
       /opt/dropbox/.dropbox/unlink.db \
       /opt/dropbox/.dropbox/dropbox.pid
 
+# --- Block Dropbox Telemetry ---
+# The Dropbox daemon has a known Rust panic in its analytics/telemetry code
+# ("publish_queue.len() > 0 so to_publish cannot be empty") that crashes
+# the daemon during indexing of large accounts. Blocking the telemetry
+# endpoint prevents this crash without affecting sync functionality.
+if ! grep -q "telemetry.dropbox.com" /etc/hosts 2>/dev/null; then
+  echo "127.0.0.1 telemetry.dropbox.com" >> /etc/hosts
+fi
+
 # --- Update Dropbox ---
 if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
   echo "Checking for latest Dropbox version..."
