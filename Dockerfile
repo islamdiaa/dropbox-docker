@@ -12,11 +12,13 @@ EXPOSE 17500
 # Prometheus metrics port
 EXPOSE 8000
 
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
 ENV LANG="C.UTF-8"
 ENV LC_ALL="C.UTF-8"
 
-# Install runtime dependencies only (no -dev packages)
-# libatomic1 is required by newer Dropbox versions using Rust components
+# Install runtime dependencies, create user, and clean up in a single layer
+# hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
    curl wget ca-certificates gosu tzdata \
@@ -26,12 +28,10 @@ RUN apt-get update \
    libxcb-present0 libxcb-sync1 \
    libxshmfence1 libxxf86vm1 \
    python3 python3-gpg python3-pip \
- && pip3 install --no-cache-dir --break-system-packages prometheus_client \
+ && pip3 install --no-cache-dir --break-system-packages prometheus_client==0.21.1 \
  && apt-get clean \
- && rm -rf /var/lib/apt/lists/*
-
-# Create user and group
-RUN mkdir -p /opt/dropbox \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /opt/dropbox \
  && useradd --home-dir /opt/dropbox --comment "Dropbox Daemon Account" --user-group --shell /usr/sbin/nologin dropbox \
  && chown -R dropbox:dropbox /opt/dropbox
 
@@ -62,7 +62,7 @@ COPY docker-entrypoint.sh /
 COPY monitoring.py /
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
-  CMD gosu dropbox dropbox status | head -1 || exit 1
+  CMD ["bash", "-c", "gosu dropbox dropbox status | head -1 || exit 1"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/opt/dropbox/bin/dropboxd"]
