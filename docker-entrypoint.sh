@@ -78,11 +78,18 @@ fi
 
 # Clear stale analytics caches that can grow to multiple GB and trigger
 # Rust panics ("queue size is inconsistent") in the analytics subsystem.
-# Then make the events directory read-only to prevent re-accumulation.
-rm -rf /opt/dropbox/.dropbox/events/* /opt/dropbox/.dropbox/sentry_exceptions/* /opt/dropbox/.dropbox/ssa_events/*
-rm -f /opt/dropbox/.dropbox/metrics/store.bin
-mkdir -p /opt/dropbox/.dropbox/events
-chmod 444 /opt/dropbox/.dropbox/events
+# Lock directories as root-owned and read-only so the daemon (running as
+# the dropbox user) cannot write new analytics data. This covers both the
+# primary path and the nested .dropbox/.dropbox path the daemon creates.
+for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
+  for dir in events ssa_events sentry_exceptions; do
+    rm -rf "${analytics_root}/${dir}/"* 2>/dev/null
+    mkdir -p "${analytics_root}/${dir}"
+    chown root:root "${analytics_root}/${dir}"
+    chmod 555 "${analytics_root}/${dir}"
+  done
+  rm -f "${analytics_root}/metrics/store.bin" 2>/dev/null
+done
 
 # --- Update Dropbox ---
 if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
