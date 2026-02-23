@@ -76,20 +76,26 @@ if ! grep -q "telemetry.dropbox.com" /etc/hosts 2>/dev/null; then
   echo "127.0.0.1 telemetry.dropbox.com" >> /etc/hosts
 fi
 
+# Function to lock down analytics directories. Called at startup and
+# before each daemon restart, since the daemon recreates these dirs.
+lock_analytics() {
+  for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
+    for dir in events ssa_events sentry_exceptions; do
+      rm -rf "${analytics_root}/${dir}/"* 2>/dev/null
+      mkdir -p "${analytics_root}/${dir}"
+      chown root:root "${analytics_root}/${dir}"
+      chmod 555 "${analytics_root}/${dir}"
+    done
+    rm -f "${analytics_root}/metrics/store.bin" 2>/dev/null
+  done
+}
+
 # Clear stale analytics caches that can grow to multiple GB and trigger
 # Rust panics ("queue size is inconsistent") in the analytics subsystem.
 # Lock directories as root-owned and read-only so the daemon (running as
 # the dropbox user) cannot write new analytics data. This covers both the
 # primary path and the nested .dropbox/.dropbox path the daemon creates.
-for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
-  for dir in events ssa_events sentry_exceptions; do
-    rm -rf "${analytics_root}/${dir}/"* 2>/dev/null
-    mkdir -p "${analytics_root}/${dir}"
-    chown root:root "${analytics_root}/${dir}"
-    chmod 555 "${analytics_root}/${dir}"
-  done
-  rm -f "${analytics_root}/metrics/store.bin" 2>/dev/null
-done
+lock_analytics
 
 # --- Update Dropbox ---
 if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
@@ -231,6 +237,9 @@ while true; do
           /opt/dropbox/.dropbox/iface_socket \
           /opt/dropbox/.dropbox/unlink.db \
           /opt/dropbox/.dropbox/dropbox.pid
+
+    # Re-lock analytics directories (daemon recreates them on crash)
+    lock_analytics
 
     gosu dropbox "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
