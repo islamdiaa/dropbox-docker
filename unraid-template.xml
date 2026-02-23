@@ -26,12 +26,14 @@ IMPORTANT: The Dropbox client does not support FUSE filesystems. You MUST use a 
 &#xD;
 Do NOT use /mnt/user — it will not work.&#xD;
 &#xD;
-Features: process supervision, Docker HEALTHCHECK, Prometheus monitoring, graceful shutdown, large account support.</Overview>
+Features: process supervision, Docker HEALTHCHECK, JSON status API, Prometheus monitoring, telemetry crash fix, graceful shutdown, large account support.&#xD;
+&#xD;
+By Islam Diaa — https://itayar.com</Overview>
   <Category>Cloud: Backup:</Category>
   <WebUI/>
   <TemplateURL>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/icon.png</Icon>
-  <ExtraParams>--restart unless-stopped --ulimit nofile=1048576:1048576</ExtraParams>
+  <ExtraParams>--restart unless-stopped --ulimit nofile=1048576:1048576 --add-host telemetry.dropbox.com:127.0.0.1</ExtraParams>
   <PostArgs/>
   <CPUset/>
   <DonateText/>
@@ -43,10 +45,11 @@ Features: process supervision, Docker HEALTHCHECK, Prometheus monitoring, gracef
   <Config Name="Group ID" Target="DROPBOX_GID" Default="100" Mode="" Description="GID for file ownership (100 = users on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
   <Config Name="Skip permissions" Target="SKIP_SET_PERMISSIONS" Default="true" Mode="" Description="Skip recursive chown on startup. Recommended for large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
-  <Config Name="Startup timeout" Target="DROPBOX_STARTUP_TIMEOUT" Default="300" Mode="" Description="Seconds to wait for daemon initialization. Increase for large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">300</Config>
-  <Config Name="Max restarts" Target="DROPBOX_MAX_RESTARTS" Default="5" Mode="" Description="How many times to restart the daemon on crash before giving up." Type="Variable" Display="advanced" Required="false" Mask="false">5</Config>
-  <Config Name="Polling interval" Target="POLLING_INTERVAL" Default="5" Mode="" Description="Seconds between status checks." Type="Variable" Display="advanced" Required="false" Mask="false">5</Config>
-  <Config Name="Enable monitoring" Target="ENABLE_MONITORING" Default="false" Mode="" Description="Enable Prometheus metrics on port 8000." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Startup timeout" Target="DROPBOX_STARTUP_TIMEOUT" Default="600" Mode="" Description="Seconds to wait for daemon initialization. Increase for very large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">600</Config>
+  <Config Name="Max restarts" Target="DROPBOX_MAX_RESTARTS" Default="20" Mode="" Description="How many times to restart the daemon on crash before giving up." Type="Variable" Display="advanced" Required="false" Mask="false">20</Config>
+  <Config Name="Polling interval" Target="POLLING_INTERVAL" Default="30" Mode="" Description="Seconds between status checks." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Enable monitoring" Target="ENABLE_MONITORING" Default="false" Mode="" Description="Enable Prometheus metrics (port 8000) and JSON status API (port 8001)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
   <Config Name="LAN Sync" Target="17500" Default="17500" Mode="tcp" Description="Dropbox LAN sync discovery port." Type="Port" Display="advanced" Required="false" Mask="false">17500</Config>
   <Config Name="Prometheus" Target="8000" Default="" Mode="tcp" Description="Prometheus metrics port (only if monitoring enabled)." Type="Port" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Status API" Target="8001" Default="" Mode="tcp" Description="JSON status API port (only if monitoring enabled)." Type="Port" Display="advanced" Required="false" Mask="false"/>
 </Container>
