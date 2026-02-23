@@ -78,9 +78,11 @@ fi
 
 # Clear stale analytics caches that can grow to multiple GB and trigger
 # Rust panics ("queue size is inconsistent") in the analytics subsystem.
-rm -f /opt/dropbox/.dropbox/events/store /opt/dropbox/.dropbox/events/store1
-rm -rf /opt/dropbox/.dropbox/sentry_exceptions/* /opt/dropbox/.dropbox/ssa_events/*
+# Then make the events directory read-only to prevent re-accumulation.
+rm -rf /opt/dropbox/.dropbox/events/* /opt/dropbox/.dropbox/sentry_exceptions/* /opt/dropbox/.dropbox/ssa_events/*
 rm -f /opt/dropbox/.dropbox/metrics/store.bin
+mkdir -p /opt/dropbox/.dropbox/events
+chmod 444 /opt/dropbox/.dropbox/events
 
 # --- Update Dropbox ---
 if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
