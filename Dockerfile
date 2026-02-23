@@ -1,6 +1,6 @@
 FROM ubuntu:24.04
 
-LABEL maintainer="Islam Diaa <https://itayar.com>"
+LABEL maintainer="Islam ElTayar <https://itayar.com>"
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG DEBCONF_NONINTERACTIVE_SEEN=true

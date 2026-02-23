@@ -1,7 +1,7 @@
 The MIT License (MIT)
 =====================
 
-Copyright (c) 2026 Islam Diaa
+Copyright (c) 2026 Islam ElTayar
 
 Portions of this project were originally derived from work by
 Alexander Graf and Jan Broer, used under the MIT License.

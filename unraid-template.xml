@@ -28,7 +28,7 @@ Do NOT use /mnt/user — it will not work.&#xD;
 &#xD;
 Features: process supervision, Docker HEALTHCHECK, JSON status API, Prometheus monitoring, telemetry crash fix, graceful shutdown, large account support.&#xD;
 &#xD;
-By Islam Diaa — https://itayar.com</Overview>
+By Islam ElTayar — https://itayar.com</Overview>
   <Category>Cloud: Backup:</Category>
   <WebUI/>
   <TemplateURL>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/unraid-template.xml</TemplateURL>

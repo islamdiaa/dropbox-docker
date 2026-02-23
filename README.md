@@ -161,7 +161,7 @@ Originally inspired by [otherguy/docker-dropbox](https://github.com/otherguy/doc
 
 ## Author
 
-[Islam Diaa](https://itayar.com) — built this for my own homelab, sharing it in case it helps yours.
+[Islam ElTayar](https://itayar.com) — built this for my own homelab, sharing it in case it helps yours.
 
 ## License
 
