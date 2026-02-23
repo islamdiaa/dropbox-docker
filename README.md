@@ -1,7 +1,8 @@
 # dropbox-docker
 
 [![CI](https://github.com/islamdiaa/dropbox-docker/actions/workflows/ci.yml/badge.svg)](https://github.com/islamdiaa/dropbox-docker/actions/workflows/ci.yml)
-[![Docker Pulls](https://img.shields.io/docker/pulls/islamdiaa/dropbox-docker)](https://hub.docker.com/r/islamdiaa/dropbox-docker)
+[![Docker Pulls](https://img.shields.io/docker/pulls/islamdiaa/dropbox-docker?v=2)](https://hub.docker.com/r/islamdiaa/dropbox-docker)
+[![Docker Image](https://img.shields.io/docker/image-size/islamdiaa/dropbox-docker/latest)](https://hub.docker.com/r/islamdiaa/dropbox-docker)
 
 A Docker container that runs the official Dropbox headless daemon on Linux. Built for homelabs and self-hosted setups that need reliable, hands-off Dropbox sync — especially large accounts with hundreds of thousands of files.
 
