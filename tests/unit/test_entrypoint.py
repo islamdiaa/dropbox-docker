@@ -1,5 +1,6 @@
 import subprocess
 import re
+import os
 import pytest
 
 
@@ -32,9 +33,10 @@ class TestEntrypointSyntax:
     """Test that the entrypoint script has valid bash syntax"""
 
     def test_syntax_check(self):
+        repo_root = os.path.join(os.path.dirname(__file__), '..', '..')
         result = subprocess.run(
             ["bash", "-n", "docker-entrypoint.sh"],
             capture_output=True, text=True,
-            cwd="/Users/islamdiaa/Desktop/pwork/homeserver/dropbox/dropbox-docker"
+            cwd=repo_root
         )
         assert result.returncode == 0, f"Syntax error: {result.stderr}"
