@@ -117,9 +117,13 @@ If you have a lot of files (500K+), a few things help:
 Works well on Unraid. A few notes:
 
 - Map `/opt/dropbox` to somewhere on appdata (e.g., `/mnt/user/appdata/dropbox`)
-- Map `/opt/dropbox/Dropbox` to your actual sync location (e.g., `/mnt/disk1/Dropbox`)
+- Map `/opt/dropbox/Dropbox` to a **direct disk path** (e.g., `/mnt/disk1/Dropbox`) — do NOT use `/mnt/user/Dropbox`
 - Set `DROPBOX_UID=99` and `DROPBOX_GID=100` (Unraid's `nobody:users`)
 - If your sync folder is large, make sure Docker's image file has enough space
+
+**Important: Set the Dropbox share to `Use cache: No`** in Unraid's share settings. If caching is enabled, files written via `/mnt/user/Dropbox/` land on the cache drive first, but the container mounts the disk path directly and won't see those files until the mover runs. Setting cache to No ensures all writes go directly to the disk where the container can detect and sync them immediately.
+
+**File ownership:** Files created by root (e.g., via SSH) inside the Dropbox folder are automatically fixed by the container. A background process runs every ~6 minutes to chown any files not owned by the Dropbox user, ensuring they get synced.
 
 ## How it works
 

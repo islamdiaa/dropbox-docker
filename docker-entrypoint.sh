@@ -67,6 +67,22 @@ rm -f /opt/dropbox/.dropbox/command_socket \
       /opt/dropbox/.dropbox/unlink.db \
       /opt/dropbox/.dropbox/dropbox.pid
 
+# Remove stale .dropbox directories from sync folder
+# These are leftover from previous installations and block the daemon
+# from writing its .dropbox marker file (PermissionDenied on unlinkat)
+if [[ -d /opt/dropbox/Dropbox/.dropbox ]]; then
+  rm -rf /opt/dropbox/Dropbox/.dropbox
+  echo "Removed stale .dropbox directory from sync folder"
+fi
+if [[ -d /opt/dropbox/Dropbox/.dropbox-dist ]]; then
+  rm -rf /opt/dropbox/Dropbox/.dropbox-dist
+  echo "Removed stale .dropbox-dist directory from sync folder"
+fi
+if [[ -d /opt/dropbox/Dropbox/.dropbox.cache ]]; then
+  rm -rf /opt/dropbox/Dropbox/.dropbox.cache
+  echo "Removed stale .dropbox.cache directory from sync folder"
+fi
+
 # --- Block Dropbox Telemetry ---
 # The Dropbox daemon has a known Rust panic in its analytics/telemetry code
 # ("publish_queue.len() > 0 so to_publish cannot be empty") that crashes
