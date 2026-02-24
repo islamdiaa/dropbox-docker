@@ -206,11 +206,20 @@ fi
 
 # --- Main Supervision Loop ---
 RESTART_COUNT=0
+OWNERSHIP_CHECK_COUNTER=0
 while true; do
   if kill -0 "${DROPBOX_PID}" 2>/dev/null; then
     # Daemon is running
     if [[ -f "/opt/dropbox/.dropbox/info.json" ]]; then
       gosu dropbox dropbox status 2>/dev/null || true
+    fi
+
+    # Fix ownership on Dropbox folder periodically (every 12 cycles ~= every 6 min at default 30s interval)
+    # Files created by other users (e.g. root via SSH) won't sync until owned by the dropbox user
+    OWNERSHIP_CHECK_COUNTER=$((OWNERSHIP_CHECK_COUNTER + 1))
+    if [[ $OWNERSHIP_CHECK_COUNTER -ge 12 ]]; then
+      find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null || true
+      OWNERSHIP_CHECK_COUNTER=0
     fi
 
     # Clean old temp files
