@@ -142,9 +142,9 @@ class TestJsonStatus:
         assert result["sync"]["syncing"] == 0
         assert result["sync"]["downloading"] == 0
         assert result["sync"]["uploading"] == 0
-        assert result["account"]["email"] == "test@example.com"
-        assert result["account"]["display_name"] == "Test User"
         assert result["account"]["linked"] is True
+        assert "email" not in result["account"]  # PII redacted for security
+        assert "display_name" not in result["account"]
         assert result["daemon"]["version"] == "242.4.5815"
         assert result["daemon"]["uptime_seconds"] >= 0
         assert result["daemon"]["restart_count"] == 0
