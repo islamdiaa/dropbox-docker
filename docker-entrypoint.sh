@@ -23,7 +23,8 @@ set -euo pipefail
 
 # --- Timezone Configuration ---
 if [ -z "${TZ:-}" ]; then
-  export TZ="$(cat /etc/timezone 2>/dev/null || echo 'UTC')"
+  TZ="$(cat /etc/timezone 2>/dev/null || echo 'UTC')"
+  export TZ
 else
   # Validate TZ to prevent path traversal (e.g. ../../etc/shadow)
   if [[ ! "${TZ}" =~ ^[A-Za-z_]+(/[A-Za-z_0-9+-]+)*$ ]]; then
@@ -41,12 +42,14 @@ echo "Timezone: ${TZ} ($(date +%H:%M:%S) local time)"
 
 # --- UID/GID Configuration ---
 if [ -z "${DROPBOX_UID:-}" ]; then
-  export DROPBOX_UID=$(/usr/bin/id -u dropbox)
+  DROPBOX_UID=$(/usr/bin/id -u dropbox)
+  export DROPBOX_UID
   echo "DROPBOX_UID not specified, defaulting to ${DROPBOX_UID}"
 fi
 
 if [ -z "${DROPBOX_GID:-}" ]; then
-  export DROPBOX_GID=$(/usr/bin/id -g dropbox)
+  DROPBOX_GID=$(/usr/bin/id -g dropbox)
+  export DROPBOX_GID
   echo "DROPBOX_GID not specified, defaulting to ${DROPBOX_GID}"
 fi
 
@@ -61,7 +64,7 @@ if [[ ! "${DROPBOX_GID}" =~ ^[0-9]+$ ]]; then
 fi
 
 # Look for existing group, if not found create dropbox with specified GID
-if [ -z "$(grep -F ":${DROPBOX_GID}:" /etc/group)" ]; then
+if ! grep -qF ":${DROPBOX_GID}:" /etc/group; then
   usermod -g users dropbox
   groupdel dropbox
   groupadd -g "${DROPBOX_GID}" dropbox
@@ -127,7 +130,7 @@ fi
 lock_analytics() {
   for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
     for dir in events ssa_events sentry_exceptions; do
-      rm -rf "${analytics_root}/${dir}/"* 2>/dev/null
+      rm -rf "${analytics_root:?}/${dir:?}/"* 2>/dev/null
       mkdir -p "${analytics_root}/${dir}"
       chown root:root "${analytics_root}/${dir}"
       chmod 555 "${analytics_root}/${dir}"
