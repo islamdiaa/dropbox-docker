@@ -12,6 +12,14 @@ The image pulls the latest Dropbox client binary on every startup, so you never 
 
 Every Dropbox Docker image I found was either abandoned, crashing on large accounts, or missing basic things like health checks and graceful shutdown. I needed something that could handle 1M+ files on an Unraid server without falling over, so I built this.
 
+### What makes this different
+
+- **Telemetry crash fix.** The Dropbox daemon has a known Rust panic in its analytics code that crashes the daemon during indexing of large accounts. This container blocks the telemetry endpoint and locks down analytics directories to prevent the crash entirely — no patches, no hacks, just isolation.
+- **File ownership auto-fix.** Files created by other users (root, SSH, scripts) inside the Dropbox folder are automatically chowned to the Dropbox user every ~6 minutes, so they actually get synced.
+- **Stale file cleanup.** Leftover `.dropbox` directories from previous installations are cleaned on startup, preventing `PermissionDenied` errors that block the daemon.
+- **Proper process supervision.** Bounded restarts, signal forwarding, graceful shutdown, startup readiness detection — not just `dropboxd &` and hope.
+- **Optional monitoring.** Prometheus metrics and a JSON status API for integrating with your existing monitoring stack.
+
 ## Getting started
 
 ```bash
@@ -48,6 +56,14 @@ services:
       DROPBOX_GID: "1000"
     ports:
       - "17500:17500"  # LAN sync discovery
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - FOWNER
+      - DAC_OVERRIDE
 
 volumes:
   dropbox-config:
@@ -72,7 +88,6 @@ All configuration is through environment variables. None are required — defaul
 | `SKIP_SET_PERMISSIONS` | `true` | When `true`, skips the recursive `chown` on `/opt/dropbox` at startup. Turn this off only if you need ownership fixed — it takes forever on large folders. |
 | `DROPBOX_SKIP_UPDATE` | _(unset)_ | Set to anything to skip pulling the latest Dropbox binary on start. Useful if you want to lock a specific version. |
 | `POLLING_INTERVAL` | `5` | How often (in seconds) to poll `dropbox status` and clean up temp files. |
-| `POLLING_CMD` | _(empty)_ | An optional shell command to run on each poll cycle. Handy for custom notifications or logging. |
 
 ### Reliability
 
@@ -87,6 +102,36 @@ All configuration is through environment variables. None are required — defaul
 | Variable | Default | What it does |
 |---|---|---|
 | `ENABLE_MONITORING` | `false` | Enables Prometheus metrics (port 8000) and JSON status API (port 8001). |
+
+When enabled, the container exposes:
+
+| Port | Endpoint | What it returns |
+|---|---|---|
+| 8000 | `/metrics` | Prometheus metrics (sync status, file counts, restart count, memory) |
+| 8001 | `/status` | JSON with sync state, account link status, version, excluded folders, errors |
+| 8001 | `/health` | `{"healthy": true/false}` — for health checks and load balancers |
+
+**Example `/status` response:**
+```json
+{
+  "status": "Up to date",
+  "account": {"linked": true},
+  "sync": {"syncing": false, "files_remaining": 0},
+  "version": "211.4.5660",
+  "memory_mb": 245,
+  "restart_count": 0,
+  "excluded_folders": ["Unraid-Backup"],
+  "last_error": null
+}
+```
+
+**Example Prometheus scrape config:**
+```yaml
+scrape_configs:
+  - job_name: dropbox
+    static_configs:
+      - targets: ['dropbox:8000']
+```
 
 ## Handling large accounts
 
@@ -129,17 +174,30 @@ Works well on Unraid. A few notes:
 
 On startup, the container:
 
-1. Sets up timezone and user/group mapping
-2. Cleans up stale socket files from any previous unclean shutdown
-3. Downloads the latest official Dropbox daemon (unless `DROPBOX_SKIP_UPDATE` is set)
-4. Installs the Dropbox CLI tool
-5. Launches `dropboxd` as a non-root user
-6. Waits for the daemon to signal readiness (or times out)
-7. Enters a supervision loop — if the daemon dies, it restarts (up to `DROPBOX_MAX_RESTARTS` times)
+1. Validates timezone, UID/GID inputs
+2. Sets up user/group mapping
+3. Cleans stale socket files and leftover `.dropbox` directories from previous runs
+4. Blocks Dropbox telemetry endpoint (prevents a known Rust panic crash)
+5. Locks analytics directories as root-owned read-only (prevents 2GB+ cache growth)
+6. Downloads the latest official Dropbox daemon (unless `DROPBOX_SKIP_UPDATE` is set)
+7. Installs the Dropbox CLI tool
+8. Launches `dropboxd` as a non-root user via `gosu`
+9. Waits for the daemon to signal readiness (or times out)
+10. Enters a supervision loop — if the daemon dies, it restarts (up to `DROPBOX_MAX_RESTARTS` times)
+11. Periodically fixes file ownership on the sync folder so files from other users get synced
 
 The container has a `HEALTHCHECK` that runs `dropbox status` every 60 seconds with a 2-minute startup grace period.
 
 Signal handling: `docker stop` sends `SIGTERM`, which the entrypoint catches and forwards to the daemon for a clean shutdown.
+
+## Security
+
+- The entrypoint runs as root (needed for UID/GID remapping) but the Dropbox daemon runs as an unprivileged user via `gosu`
+- All user inputs (TZ, UID, GID) are validated before use
+- The monitoring endpoints do not expose account email or PII
+- No `docker.sock` mount required
+- Runs in bridge networking mode (not host)
+- The Dropbox binary is downloaded from `dropbox.com` over HTTPS at runtime — Dropbox does not publish checksums for their Linux client, so integrity verification is not possible. See [SECURITY.md](SECURITY.md) for details.
 
 ## Building from source
 

@@ -4,12 +4,32 @@ set -euo pipefail
 # ============================================================================
 # Dropbox Docker Entrypoint
 # ============================================================================
+#
+# This script is PID 1 inside the container. It runs as root because it needs
+# to remap UID/GID at runtime (usermod, groupadd, chown). The actual Dropbox
+# daemon is launched as an unprivileged user via gosu.
+#
+# Flow:
+#   1. Validate and configure timezone, UID/GID
+#   2. Clean stale files from previous runs
+#   3. Block Dropbox telemetry (prevents a known Rust panic crash)
+#   4. Download/update the Dropbox daemon binary
+#   5. Launch dropboxd as the dropbox user
+#   6. Wait for readiness, then enter supervision loop
+#   7. On SIGTERM/SIGINT: forward signal to daemon, wait, exit cleanly
+#
+# Environment variables: see README.md for full documentation.
+# ============================================================================
 
 # --- Timezone Configuration ---
 if [ -z "${TZ:-}" ]; then
   export TZ="$(cat /etc/timezone 2>/dev/null || echo 'UTC')"
 else
-  if [ ! -f "/usr/share/zoneinfo/${TZ}" ]; then
+  # Validate TZ to prevent path traversal (e.g. ../../etc/shadow)
+  if [[ ! "${TZ}" =~ ^[A-Za-z_]+(/[A-Za-z_0-9+-]+)*$ ]]; then
+    echo "WARNING: Timezone '${TZ}' contains invalid characters, using UTC"
+    export TZ="UTC"
+  elif [ ! -f "/usr/share/zoneinfo/${TZ}" ]; then
     echo "WARNING: Timezone '${TZ}' is unavailable, using UTC"
     export TZ="UTC"
   else
@@ -30,8 +50,18 @@ if [ -z "${DROPBOX_GID:-}" ]; then
   echo "DROPBOX_GID not specified, defaulting to ${DROPBOX_GID}"
 fi
 
+# Validate UID/GID are numeric
+if [[ ! "${DROPBOX_UID}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: DROPBOX_UID '${DROPBOX_UID}' is not a valid number"
+  exit 1
+fi
+if [[ ! "${DROPBOX_GID}" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: DROPBOX_GID '${DROPBOX_GID}' is not a valid number"
+  exit 1
+fi
+
 # Look for existing group, if not found create dropbox with specified GID
-if [ -z "$(grep ":${DROPBOX_GID}:" /etc/group)" ]; then
+if [ -z "$(grep -F ":${DROPBOX_GID}:" /etc/group)" ]; then
   usermod -g users dropbox
   groupdel dropbox
   groupadd -g "${DROPBOX_GID}" dropbox
@@ -238,13 +268,8 @@ while true; do
       OWNERSHIP_CHECK_COUNTER=0
     fi
 
-    # Clean old temp files
-    /usr/bin/find /tmp/ -maxdepth 1 -type d -mtime +1 ! -path /tmp/ -exec rm -rf {} \; 2>/dev/null || true
-
-    # Execute optional polling command
-    if [[ -n "${POLLING_CMD}" ]]; then
-      eval "${POLLING_CMD}" 2>/dev/null || true
-    fi
+    # Clean old temp files (scoped to dropbox temp dirs only)
+    /usr/bin/find /tmp/ -maxdepth 1 -type d -name 'dropbox*' -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
 
     sleep "${POLLING_INTERVAL}"
   else

@@ -21,6 +21,14 @@ services:
       # POLLING_INTERVAL: "30"              # less frequent status polling
     ports:
       - "17500:17500"  # LAN sync discovery (optional)
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETUID
+      - SETGID
+      - FOWNER
+      - DAC_OVERRIDE
     # Uncomment for large accounts:
     # deploy:
     #   resources:

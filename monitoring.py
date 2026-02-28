@@ -53,7 +53,7 @@ class DropboxInterface:
             else:
                 self.logger.debug("Got result from Dropbox: %s", result.stdout)
                 return result.stdout
-        except:
+        except Exception:
             self.logger.exception("Failed to invoke Dropbox")
             return None
 
@@ -64,7 +64,7 @@ class DropboxInterface:
             if os.path.exists(info_path):
                 with open(info_path) as f:
                     return json.load(f)
-        except:
+        except Exception:
             pass
         return None
 
@@ -78,7 +78,7 @@ class DropboxInterface:
                 lines = result.stdout.strip().splitlines()
                 # First line is header like "Excluded:"
                 return [l.strip() for l in lines[1:] if l.strip()] if len(lines) > 1 else []
-        except:
+        except Exception:
             pass
         return None
 
@@ -89,7 +89,7 @@ class DropboxInterface:
             if os.path.exists(version_path):
                 with open(version_path) as f:
                     return f.read().strip()
-        except:
+        except Exception:
             pass
         return None
 
@@ -188,16 +188,11 @@ class DropboxMonitor:
         # Trigger a refresh if stale
         self.get_status(Metric.NUM_SYNCING)
 
-        # Account info
+        # Account info (redacted for privacy — no PII in API responses)
         account = {}
         info = self.dropbox.query_account_info()
         if info:
-            personal = info.get("personal", {})
-            account = {
-                "email": personal.get("email"),
-                "display_name": personal.get("display_name"),
-                "linked": True,
-            }
+            account = {"linked": True}
         else:
             account = {"linked": False}
 
@@ -215,7 +210,7 @@ class DropboxMonitor:
                     if line.startswith("VmRSS:"):
                         memory_mb = int(line.split()[1]) / 1024
                         break
-        except:
+        except Exception:
             pass
 
         # Uptime
@@ -307,7 +302,7 @@ class DropboxMonitor:
                         self.last_error = line
                     else:
                         self.logger.debug("Ignoring line '%s'", line)
-            except:
+            except Exception:
                 self.logger.exception("Failed to parse status line '%s'", line)
 
         self.state = state
@@ -333,7 +328,6 @@ class StatusHandler(BaseHTTPRequestHandler):
             payload = json.dumps(data, indent=2)
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             self.write(payload.encode())
         elif self.path == "/health" or self.path == "/health/":
