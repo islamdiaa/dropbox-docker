@@ -53,7 +53,7 @@ class DropboxInterface:
             else:
                 self.logger.debug("Got result from Dropbox: %s", result.stdout)
                 return result.stdout
-        except:
+        except Exception:
             self.logger.exception("Failed to invoke Dropbox")
             return None
 
@@ -64,7 +64,7 @@ class DropboxInterface:
             if os.path.exists(info_path):
                 with open(info_path) as f:
                     return json.load(f)
-        except:
+        except (OSError, json.JSONDecodeError, ValueError):
             pass
         return None
 
@@ -78,7 +78,7 @@ class DropboxInterface:
                 lines = result.stdout.strip().splitlines()
                 # First line is header like "Excluded:"
                 return [l.strip() for l in lines[1:] if l.strip()] if len(lines) > 1 else []
-        except:
+        except Exception:
             pass
         return None
 
@@ -89,7 +89,7 @@ class DropboxInterface:
             if os.path.exists(version_path):
                 with open(version_path) as f:
                     return f.read().strip()
-        except:
+        except (OSError, ValueError):
             pass
         return None
 
@@ -215,7 +215,7 @@ class DropboxMonitor:
                     if line.startswith("VmRSS:"):
                         memory_mb = int(line.split()[1]) / 1024
                         break
-        except:
+        except (OSError, ValueError, IndexError):
             pass
 
         # Uptime
@@ -307,7 +307,7 @@ class DropboxMonitor:
                         self.last_error = line
                     else:
                         self.logger.debug("Ignoring line '%s'", line)
-            except:
+            except Exception:
                 self.logger.exception("Failed to parse status line '%s'", line)
 
         self.state = state
@@ -373,10 +373,11 @@ if __name__ == "__main__":
         "-i",
         "--min_poll_interval_sec",
         help="minimum interval for polling Dropbox (in seconds)",
+        type=int,
         default=5,
     )
-    parser.add_argument("-p", "--port", help="Prometheus port", default=8000)
-    parser.add_argument("--status-port", help="JSON status API port", default=8001)
+    parser.add_argument("-p", "--port", help="Prometheus port", type=int, default=8000)
+    parser.add_argument("--status-port", help="JSON status API port", type=int, default=8001)
     parser.add_argument("--log_level", default="INFO")
     parser.add_argument("--global_log_level", default="INFO")
     args = parser.parse_args()
@@ -392,14 +393,14 @@ if __name__ == "__main__":
     dropbox = DropboxInterface(logger)
     monitor = DropboxMonitor(
         dropbox=dropbox,
-        min_poll_interval_sec=int(args.min_poll_interval_sec),
+        min_poll_interval_sec=args.min_poll_interval_sec,
         logger=logger,
         prom_port=args.port,
     )
     monitor.start()
 
     # Start JSON status API
-    start_status_server(monitor, int(args.status_port), logger)
+    start_status_server(monitor, args.status_port, logger)
 
     exit_event = Event()
     signal.signal(signal.SIGHUP, lambda _s, _f: exit_event.set())

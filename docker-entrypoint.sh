@@ -61,11 +61,16 @@ fi
 
 [[ -d /opt/dropbox/Dropbox ]] && chmod 755 /opt/dropbox/Dropbox
 
+# Remove stale sockets and pid files that prevent the daemon from starting
+clean_stale_files() {
+  rm -f /opt/dropbox/.dropbox/command_socket \
+        /opt/dropbox/.dropbox/iface_socket \
+        /opt/dropbox/.dropbox/unlink.db \
+        /opt/dropbox/.dropbox/dropbox.pid
+}
+
 # --- Clean Stale Files ---
-rm -f /opt/dropbox/.dropbox/command_socket \
-      /opt/dropbox/.dropbox/iface_socket \
-      /opt/dropbox/.dropbox/unlink.db \
-      /opt/dropbox/.dropbox/dropbox.pid
+clean_stale_files
 
 # Remove stale .dropbox directories from sync folder
 # These are leftover from previous installations and block the daemon
@@ -156,7 +161,8 @@ if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; t
         rm -rf /opt/dropbox/bin/*
         mv "$tmpdir"/.dropbox-dist/* /opt/dropbox/bin/
         rm -rf "$tmpdir"
-        find /opt/dropbox/bin/ -type f -name "*.so" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} \; -exec chmod a+rx {} \;
+        find /opt/dropbox/bin/ -type f -name "*.so" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} +
+        find /opt/dropbox/bin/ -type f -name "*.so" -exec chmod a+rx {} +
         echo "Dropbox updated to v$Latest"
       else
         echo "Dropbox is up-to-date"
@@ -180,10 +186,16 @@ umask 002
 
 # --- Signal Handler ---
 DROPBOX_PID=""
+MONITORING_PID=""
 cleanup() {
   echo "Received shutdown signal. Stopping Dropbox daemon (PID: ${DROPBOX_PID})..."
   kill -SIGTERM "${DROPBOX_PID}" 2>/dev/null
+  if [[ -n "${MONITORING_PID}" ]]; then
+    echo "Stopping monitoring process (PID: ${MONITORING_PID})..."
+    kill -SIGTERM "${MONITORING_PID}" 2>/dev/null
+  fi
   wait "${DROPBOX_PID}" 2>/dev/null
+  [[ -n "${MONITORING_PID}" ]] && wait "${MONITORING_PID}" 2>/dev/null
   echo "Dropbox daemon stopped."
   exit 0
 }
@@ -197,7 +209,8 @@ gosu dropbox "$@" & DROPBOX_PID="$!"
 if [[ $(echo "${ENABLE_MONITORING:-false}" | tr '[:upper:]' '[:lower:]' | tr -d " ") == "true" ]]; then
   echo "Starting Prometheus metrics on port 8000 and status API on port 8001..."
   gosu dropbox python3 /monitoring.py -i "${POLLING_INTERVAL}" --status-port 8001 &
-  echo "Monitoring started (PID: $!)"
+  MONITORING_PID="$!"
+  echo "Monitoring started (PID: ${MONITORING_PID})"
 fi
 
 # --- Wait for Daemon Startup ---
@@ -241,7 +254,9 @@ while true; do
     # Clean old temp files
     /usr/bin/find /tmp/ -maxdepth 1 -type d -mtime +1 ! -path /tmp/ -exec rm -rf {} \; 2>/dev/null || true
 
-    # Execute optional polling command
+    # Execute optional polling command.
+    # WARNING: POLLING_CMD is eval'd to support complex shell expressions
+    # (pipes, redirects, etc.). Only set this in trusted environments.
     if [[ -n "${POLLING_CMD}" ]]; then
       eval "${POLLING_CMD}" 2>/dev/null || true
     fi
@@ -258,10 +273,7 @@ while true; do
     sleep "${DROPBOX_RESTART_DELAY}"
 
     # Clean stale sockets before restart
-    rm -f /opt/dropbox/.dropbox/command_socket \
-          /opt/dropbox/.dropbox/iface_socket \
-          /opt/dropbox/.dropbox/unlink.db \
-          /opt/dropbox/.dropbox/dropbox.pid
+    clean_stale_files
 
     # Re-lock analytics directories (daemon recreates them on crash)
     lock_analytics
