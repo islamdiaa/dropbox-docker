@@ -1,3 +1,3 @@
 # Runtime Python dependencies installed into the image (monitoring.py).
 # Kept here so Dependabot can keep them up to date.
-prometheus_client==0.21.1
+prometheus_client==0.26.0
