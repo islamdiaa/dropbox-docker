@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 echo "=== E2E Test: Permissions ==="
+# shellcheck source=tests/e2e/lib.sh
+source "$(dirname "$0")/lib.sh"
 CONTAINER_NAME="dropbox-test-perms-$$"
 
 cleanup() {
@@ -9,9 +11,8 @@ cleanup() {
 trap cleanup EXIT
 
 # Test SKIP_SET_PERMISSIONS=true (default)
-docker run -d --name "$CONTAINER_NAME" \
-  -e SKIP_SET_PERMISSIONS=true \
-  dropbox-test:e2e
+run_container "$CONTAINER_NAME" \
+  -e SKIP_SET_PERMISSIONS=true
 
 sleep 5
 

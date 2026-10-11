@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 echo "=== E2E Test: Container Startup ==="
+# shellcheck source=tests/e2e/lib.sh
+source "$(dirname "$0")/lib.sh"
 CONTAINER_NAME="dropbox-test-startup-$$"
 
 cleanup() {
@@ -8,9 +10,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker run -d --name "$CONTAINER_NAME" \
-  -e SKIP_SET_PERMISSIONS=true \
-  dropbox-test:e2e
+run_container "$CONTAINER_NAME" \
+  -e SKIP_SET_PERMISSIONS=true
+
+wait_for_log "$CONTAINER_NAME" "Dropbox daemon is ready"
+echo "PASS: Daemon started"
 
 sleep 10
 
@@ -23,13 +27,11 @@ if [ "$STATUS" != "running" ]; then
 fi
 echo "PASS: Container is running"
 
-# Check logs for auth URL or successful start
-LOGS=$(docker logs "$CONTAINER_NAME" 2>&1)
-if echo "$LOGS" | grep -qE "dropbox.com/cli_link|Starting dropboxd|Dropbox updated"; then
-  echo "PASS: Daemon started (auth URL or start message found)"
-else
-  echo "WARNING: Expected startup messages not found in logs"
-  echo "$LOGS" | tail -20
+if docker logs "$CONTAINER_NAME" 2>&1 | grep -q "Dropbox daemon exited"; then
+  echo "FAIL: Daemon exited after startup"
+  docker logs "$CONTAINER_NAME" 2>&1 | tail -20
+  exit 1
 fi
+echo "PASS: Daemon stayed up"
 
 echo "=== Startup tests passed ==="

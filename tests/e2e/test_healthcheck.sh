@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 echo "=== E2E Test: Healthcheck ==="
+# shellcheck source=tests/e2e/lib.sh
+source "$(dirname "$0")/lib.sh"
 CONTAINER_NAME="dropbox-test-health-$$"
 
 cleanup() {
@@ -8,9 +10,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-docker run -d --name "$CONTAINER_NAME" \
-  -e SKIP_SET_PERMISSIONS=true \
-  dropbox-test:e2e
+if ! docker image inspect "$IMAGE" --format '{{.Config.Healthcheck}}' | grep -q "dropbox status"; then
+  echo "FAIL: Healthcheck is not configured"
+  exit 1
+fi
+echo "PASS: Healthcheck configured"
+
+run_container "$CONTAINER_NAME" \
+  -e SKIP_SET_PERMISSIONS=true
 
 # Check that healthcheck exists and container starts in 'starting' state
 sleep 5

@@ -1,0 +1,55 @@
+#!/bin/bash
+set -e
+echo "=== E2E Test: Sync Folder Permissions ==="
+# Regression test for #12: a sync folder created by Docker is owned by root,
+# so the daemon linked fine but could never write a file.
+# shellcheck source=tests/e2e/lib.sh
+source "$(dirname "$0")/lib.sh"
+CONTAINER_NAME="dropbox-test-syncdir-$$"
+VOLUME_NAME="dropbox-test-syncdir-$$"
+
+cleanup() {
+  docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+  docker volume rm "$VOLUME_NAME" > /dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+# A new named volume's root directory is root:root 755, just like a bind
+# mount source that Docker creates on the host. Use Unraid's nobody:users.
+run_container "$CONTAINER_NAME" \
+  -v "$VOLUME_NAME:/opt/dropbox/Dropbox" \
+  -e DROPBOX_UID=99 \
+  -e DROPBOX_GID=100
+
+wait_for_log "$CONTAINER_NAME" "Starting dropboxd"
+
+if ! docker exec "$CONTAINER_NAME" gosu dropbox touch /opt/dropbox/Dropbox/.write-test; then
+  echo "FAIL: Sync folder is not writable by the dropbox user"
+  docker logs "$CONTAINER_NAME" 2>&1 | head -20
+  exit 1
+fi
+echo "PASS: Sync folder is writable by the dropbox user"
+docker rm -f "$CONTAINER_NAME" > /dev/null
+
+# With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the
+# problem reported loudly instead.
+docker volume rm "$VOLUME_NAME" > /dev/null
+run_container "$CONTAINER_NAME" \
+  -v "$VOLUME_NAME:/opt/dropbox/Dropbox" \
+  -e DROPBOX_UID=99 \
+  -e DROPBOX_GID=100 \
+  -e OWNERSHIP_FIX_MODE=disabled
+
+wait_for_log "$CONTAINER_NAME" "Starting dropboxd"
+OWNER=$(docker exec "$CONTAINER_NAME" stat -c '%u:%g' /opt/dropbox/Dropbox)
+if [ "$OWNER" != "0:0" ]; then
+  echo "FAIL: OWNERSHIP_FIX_MODE=disabled changed the sync folder owner to $OWNER"
+  exit 1
+fi
+if ! docker logs "$CONTAINER_NAME" 2>&1 | grep -q "is not writable by UID 99"; then
+  echo "FAIL: Unwritable sync folder was not reported"
+  exit 1
+fi
+echo "PASS: OWNERSHIP_FIX_MODE=disabled leaves ownership alone and reports the problem"
+
+echo "=== Sync folder tests passed ==="
