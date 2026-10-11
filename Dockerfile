@@ -19,6 +19,8 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV LANG="C.UTF-8"
 ENV LC_ALL="C.UTF-8"
 
+COPY requirements.txt /tmp/requirements.txt
+
 # Install runtime dependencies, create user, and clean up in a single layer
 # hadolint ignore=DL3008
 RUN apt-get update \
@@ -30,7 +32,8 @@ RUN apt-get update \
    libxcb-present0 libxcb-sync1 \
    libxshmfence1 libxxf86vm1 \
    python3 python3-gpg python3-pip \
- && pip3 install --no-cache-dir --break-system-packages prometheus_client==0.21.1 \
+ && pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
+ && rm /tmp/requirements.txt \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /opt/dropbox \
@@ -51,6 +54,10 @@ LABEL org.opencontainers.image.source="https://github.com/islamdiaa/dropbox-dock
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.licenses="MIT"
 
+# Shown at startup, so logs posted in issues identify the image
+ENV IMAGE_VERSION="${VERSION}"
+ENV IMAGE_REVISION="${VCS_REF}"
+
 # Configurable settings
 ENV POLLING_INTERVAL=5
 ENV SKIP_SET_PERMISSIONS=true
@@ -61,11 +68,12 @@ ENV DROPBOX_STARTUP_TIMEOUT=300
 ENV OWNERSHIP_FIX_MODE=full
 ENV OWNERSHIP_FIX_INTERVAL=360
 
-COPY docker-entrypoint.sh /
-COPY monitoring.py /
+COPY --chmod=755 docker-entrypoint.sh healthcheck.sh /
+COPY --chmod=644 monitoring.py /
+COPY webui /webui
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \
-  CMD ["bash", "-c", "gosu dropbox dropbox status | head -1 || exit 1"]
+  CMD ["/healthcheck.sh"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/opt/dropbox/bin/dropboxd"]

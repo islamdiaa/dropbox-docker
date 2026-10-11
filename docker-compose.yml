@@ -15,6 +15,8 @@ services:
       TZ: Europe/London
       DROPBOX_UID: "1000"
       DROPBOX_GID: "1000"
+      # Status page on port 8001, Prometheus metrics on port 8000
+      ENABLE_MONITORING: "true"
       # Recommended for large accounts (500K+ files):
       # SKIP_SET_PERMISSIONS: "true"        # default, skips slow chown -R
       # DROPBOX_STARTUP_TIMEOUT: "600"      # more time for initial indexing
@@ -22,6 +24,8 @@ services:
       # Shared NAS where Dropbox gets access via a group or ACL:
       # OWNERSHIP_FIX_MODE: "group-only"    # or "disabled"; default "full"
     ports:
+      - "8001:8001"    # status page and JSON API
+      # - "8000:8000"  # Prometheus metrics
       - "17500:17500"  # LAN sync discovery (optional)
     # These are the only capabilities the container needs
     cap_drop:

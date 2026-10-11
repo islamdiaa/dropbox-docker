@@ -1,16 +1,11 @@
 version: 2
 updates:
 
-  # Keep the base image up to date within its Ubuntu LTS release. Moving to
-  # a new LTS (e.g. 26.04) changes package names and needs a deliberate,
-  # tested change rather than an automatic bump.
-  - package-ecosystem: docker
-    directory: "/"
-    schedule:
-      interval: weekly
-    ignore:
-      - dependency-name: ubuntu
-        update-types: ["version-update:semver-major"]
+  # The Ubuntu base image is deliberately not managed here: the only
+  # candidate tags are newer releases (interim ones like 24.10 go end of
+  # life within months), and moving LTS needs a tested change. Patches for
+  # 24.04 arrive through the monthly scheduled build, which pulls the base
+  # image fresh and skips the layer cache.
 
   # Maintain dependencies for GitHub Actions, grouped into a single PR
   - package-ecosystem: "github-actions"
@@ -19,4 +14,13 @@ updates:
       interval: weekly
     groups:
       github-actions:
+        patterns: ["*"]
+
+  # Python packages: requirements.txt (image) and tests/requirements-test.txt
+  - package-ecosystem: pip
+    directories: ["/", "/tests"]
+    schedule:
+      interval: weekly
+    groups:
+      python:
         patterns: ["*"]

@@ -1,6 +1,7 @@
 import logging
 import pytest
 from unittest.mock import MagicMock
+import monitoring
 from monitoring import DropboxMonitor, DropboxInterface, State, Metric
 
 
@@ -11,7 +12,11 @@ def logger():
 
 @pytest.fixture
 def mock_dropbox(logger):
-    return MagicMock(spec=DropboxInterface)
+    dropbox = MagicMock(spec=DropboxInterface)
+    dropbox.query_daemon_pid.return_value = 1234
+    dropbox.query_daemon_memory_bytes.return_value = 256 * 1024 * 1024
+    dropbox.query_restart_count.return_value = 0
+    return dropbox
 
 
 @pytest.fixture
@@ -173,3 +178,158 @@ class TestJsonStatus:
 
         assert result["status"] == "sync_error"
         assert "big.zip" in result["last_error"]
+
+
+class TestDaemonHealth:
+    def test_healthy_when_daemon_running(self, monitor, mock_dropbox):
+        mock_dropbox.query_status.return_value = "Up to date\n"
+        mock_dropbox.query_account_info.return_value = None
+        mock_dropbox.query_exclude_list.return_value = None
+        mock_dropbox.query_version.return_value = None
+        assert monitor.is_healthy() is True
+        assert monitor.get_json_status()["healthy"] is True
+
+    def test_unhealthy_without_daemon(self, monitor, mock_dropbox):
+        mock_dropbox.query_daemon_pid.return_value = None
+        assert monitor.is_healthy() is False
+
+    def test_reports_daemon_memory_and_restarts(self, monitor, mock_dropbox):
+        mock_dropbox.query_status.return_value = "Up to date\n"
+        mock_dropbox.query_account_info.return_value = None
+        mock_dropbox.query_exclude_list.return_value = None
+        mock_dropbox.query_version.return_value = None
+        mock_dropbox.query_restart_count.return_value = 3
+        result = monitor.get_json_status()
+        assert result["daemon"]["memory_mb"] == 256.0
+        assert result["daemon"]["restart_count"] == 3
+
+    def test_image_version_from_environment(self, monitor, mock_dropbox, monkeypatch):
+        monkeypatch.setenv("IMAGE_VERSION", "1.3.0")
+        monkeypatch.setenv("IMAGE_REVISION", "abc1234def")
+        mock_dropbox.query_status.return_value = "Up to date\n"
+        mock_dropbox.query_account_info.return_value = None
+        mock_dropbox.query_exclude_list.return_value = None
+        mock_dropbox.query_version.return_value = None
+        assert monitor.get_json_status()["image"] == {"version": "1.3.0", "revision": "abc1234def"}
+
+
+class TestProcHelpers:
+    def _proc(self, tmp_path, pid, argv, rss_kb=None):
+        d = tmp_path / str(pid)
+        d.mkdir()
+        (d / "cmdline").write_bytes(b"\0".join(a.encode() for a in argv) + b"\0")
+        if rss_kb is not None:
+            (d / "status").write_text(f"Name:\tdropbox\nVmRSS:\t{rss_kb} kB\n")
+
+    def test_finds_daemon(self, tmp_path):
+        self._proc(tmp_path, 10, ["/bin/bash", "/docker-entrypoint.sh"])
+        self._proc(tmp_path, 42, ["/opt/dropbox/bin/dropbox-lnx.x86_64-272.4.3798/dropbox"])
+        (tmp_path / "self").mkdir()
+        assert monitoring.find_daemon_pid(str(tmp_path)) == 42
+
+    def test_ignores_cli_and_launcher(self, tmp_path):
+        self._proc(tmp_path, 11, ["/bin/sh", "/opt/dropbox/bin/dropboxd"])
+        self._proc(tmp_path, 12, ["python3", "/opt/dropbox.py", "status"])
+        assert monitoring.find_daemon_pid(str(tmp_path)) is None
+
+    def test_missing_proc_root(self, tmp_path):
+        assert monitoring.find_daemon_pid(str(tmp_path / "nope")) is None
+
+    def test_read_rss(self, tmp_path):
+        self._proc(tmp_path, 42, ["x"], rss_kb=2048)
+        assert monitoring.read_rss_bytes(42, str(tmp_path)) == 2048 * 1024
+        assert monitoring.read_rss_bytes(43, str(tmp_path)) is None
+
+    def test_restart_count_file(self, tmp_path, monkeypatch, logger):
+        path = tmp_path / "restart_count"
+        monkeypatch.setattr(monitoring, "RESTART_COUNT_FILE", str(path))
+        dropbox = DropboxInterface(logger)
+        assert dropbox.query_restart_count() == 0
+        path.write_text("4\n")
+        assert dropbox.query_restart_count() == 4
+        path.write_text("garbage")
+        assert dropbox.query_restart_count() == 0
+
+
+class TestPrometheusMetrics:
+    def test_daemon_gauges_exported(self, monitor, mock_dropbox, monkeypatch):
+        from prometheus_client import REGISTRY, generate_latest
+        from prometheus_client.parser import text_string_to_metric_families
+        monkeypatch.setattr(monitoring, "start_http_server", lambda port: None)
+        mock_dropbox.query_status.return_value = "Up to date\n"
+        mock_dropbox.query_restart_count.return_value = 2
+        monitor.start()
+        samples = {
+            sample.name: sample.value
+            for family in text_string_to_metric_families(generate_latest(REGISTRY).decode())
+            for sample in family.samples
+        }
+        assert samples["dropbox_daemon_up"] == 1
+        assert samples["dropbox_daemon_restarts"] == 2
+        assert samples["dropbox_daemon_memory_bytes"] == 256 * 1024 * 1024
+
+
+class TestStatusServer:
+    @pytest.fixture
+    def server(self, monitor, mock_dropbox):
+        from http.server import HTTPServer
+        from threading import Thread
+        mock_dropbox.query_status.return_value = "Up to date\n"
+        mock_dropbox.query_account_info.return_value = {"personal": {}}
+        mock_dropbox.query_exclude_list.return_value = []
+        mock_dropbox.query_version.return_value = "272.4.3798"
+        monitoring.StatusHandler.monitor = monitor
+        httpd = HTTPServer(("127.0.0.1", 0), monitoring.StatusHandler)
+        Thread(target=httpd.serve_forever, daemon=True).start()
+        yield f"http://127.0.0.1:{httpd.server_address[1]}"
+        httpd.shutdown()
+        httpd.server_close()
+
+    def _get(self, url):
+        import urllib.request
+        import urllib.error
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return r.status, dict(r.headers), r.read()
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers), e.read()
+
+    def test_status_json(self, server):
+        import json
+        code, headers, body = self._get(server + "/status")
+        assert code == 200
+        assert headers["Content-Type"] == "application/json"
+        data = json.loads(body)
+        assert data["status"] == "up to date"
+        assert data["account"] == {"linked": True}
+
+    def test_health_ok(self, server):
+        code, _, body = self._get(server + "/health")
+        assert code == 200
+        assert b'"healthy": true' in body
+
+    def test_health_unhealthy(self, server, mock_dropbox):
+        mock_dropbox.query_daemon_pid.return_value = None
+        code, _, body = self._get(server + "/health")
+        assert code == 503
+        assert b'"healthy": false' in body
+
+    def test_status_page(self, server):
+        code, headers, body = self._get(server + "/")
+        assert code == 200
+        assert headers["Content-Type"].startswith("text/html")
+        assert "script-src 'self'" in headers["Content-Security-Policy"]
+        assert headers["X-Content-Type-Options"] == "nosniff"
+        assert b'<script src="app.js"' in body
+
+    def test_static_assets(self, server):
+        for path, kind in (("/app.js", "text/javascript"), ("/style.css", "text/css")):
+            code, headers, body = self._get(server + path)
+            assert code == 200
+            assert headers["Content-Type"].startswith(kind)
+            assert body
+
+    def test_unknown_path_and_traversal(self, server):
+        for path in ("/nope", "/../monitoring.py", "/webui/index.html"):
+            code, _, _ = self._get(server + path)
+            assert code == 404
