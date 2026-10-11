@@ -7,7 +7,7 @@
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/islamdiaa/dropbox-docker/issues</Support>
+  <Support>https://forums.unraid.net/topic/197487-support-dropbox-docker-reliable-headless-dropbox-for-unraid-islamdiaadropbox-docker/</Support>
   <Project>https://github.com/islamdiaa/dropbox-docker</Project>
   <ReadMe>https://github.com/islamdiaa/dropbox-docker/blob/main/README.md</ReadMe>
   <Overview>Run the official Dropbox headless daemon in Docker. Built for reliability — handles large accounts (1M+ files), auto-restarts on crash, and stays up-to-date by pulling the latest Dropbox client on every startup.&#xD;
@@ -24,7 +24,11 @@ IMPORTANT: The Dropbox client does not support FUSE filesystems. You MUST use a 
   If your Dropbox share uses cache "No": /mnt/disk1/Dropbox&#xD;
   If your Dropbox share uses cache "Only": /mnt/cache/Dropbox&#xD;
 &#xD;
-Do NOT use /mnt/user — it will not work.&#xD;
+Do NOT use /mnt/user — it will not work. The container log warns you if it detects this.&#xD;
+&#xD;
+If Dropbox asks you to link again after every restart, put the config on a direct path too (e.g. /mnt/cache/appdata/dropbox).&#xD;
+&#xD;
+Problems? Check the container log first: it reports a sync folder Dropbox can't write to, and where your account actually syncs to.&#xD;
 &#xD;
 Features: process supervision, Docker HEALTHCHECK, JSON status API, Prometheus monitoring, telemetry crash fix, graceful shutdown, large account support.&#xD;
 &#xD;
@@ -40,7 +44,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Config Name="Dropbox sync folder" Target="/opt/dropbox/Dropbox" Default="/mnt/disk1/Dropbox" Mode="rw" Description="Where your Dropbox files live. Must be a direct disk path (not /mnt/user)." Type="Path" Display="always" Required="true" Mask="false">/mnt/disk1/Dropbox</Config>
-  <Config Name="Dropbox config" Target="/opt/dropbox/.dropbox" Default="/mnt/user/appdata/dropbox" Mode="rw" Description="Persistent config and account data." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dropbox</Config>
+  <Config Name="Dropbox config" Target="/opt/dropbox/.dropbox" Default="/mnt/user/appdata/dropbox" Mode="rw" Description="Persistent config and account data. If Dropbox asks you to link again after restarts, use a direct path such as /mnt/cache/appdata/dropbox." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dropbox</Config>
   <Config Name="User ID" Target="DROPBOX_UID" Default="99" Mode="" Description="UID for file ownership (99 = nobody on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
   <Config Name="Group ID" Target="DROPBOX_GID" Default="100" Mode="" Description="GID for file ownership (100 = users on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
@@ -48,6 +52,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <Config Name="Startup timeout" Target="DROPBOX_STARTUP_TIMEOUT" Default="600" Mode="" Description="Seconds to wait for daemon initialization. Increase for very large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">600</Config>
   <Config Name="Max restarts" Target="DROPBOX_MAX_RESTARTS" Default="20" Mode="" Description="How many times to restart the daemon on crash before giving up." Type="Variable" Display="advanced" Required="false" Mask="false">20</Config>
   <Config Name="Polling interval" Target="POLLING_INTERVAL" Default="30" Mode="" Description="Seconds between status checks." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Ownership repair" Target="OWNERSHIP_FIX_MODE" Default="full" Mode="" Description="full: chown files in the sync folder not owned by User ID. group-only: only set their group. disabled: never change ownership." Type="Variable" Display="advanced" Required="false" Mask="false">full</Config>
   <Config Name="Enable monitoring" Target="ENABLE_MONITORING" Default="false" Mode="" Description="Enable Prometheus metrics (port 8000) and JSON status API (port 8001)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
   <Config Name="LAN Sync" Target="17500" Default="17500" Mode="tcp" Description="Dropbox LAN sync discovery port." Type="Port" Display="advanced" Required="false" Mask="false">17500</Config>
   <Config Name="Prometheus" Target="8000" Default="" Mode="tcp" Description="Prometheus metrics port (only if monitoring enabled)." Type="Port" Display="advanced" Required="false" Mask="false"/>
