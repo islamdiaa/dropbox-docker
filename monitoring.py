@@ -14,6 +14,48 @@ from typing import Optional
 
 from prometheus_client import start_http_server, Enum as EnumMetric, Gauge  # type: ignore
 
+# The daemon's executable, as launched by /opt/dropbox/bin/dropboxd
+DAEMON_PATH_RE = re.compile(r"^/opt/dropbox/bin/dropbox-lnx[^/]*/dropbox$")
+# Written by docker-entrypoint.sh each time it restarts the daemon
+RESTART_COUNT_FILE = "/run/dropbox-docker/restart_count"
+WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui")
+WEBUI_FILES = {
+    "/": ("index.html", "text/html; charset=utf-8"),
+    "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+    "/style.css": ("style.css", "text/css; charset=utf-8"),
+}
+
+
+def find_daemon_pid(proc_root: str = "/proc") -> Optional[int]:
+    """Return the PID of the Dropbox daemon, or None if it isn't running."""
+    try:
+        entries = os.listdir(proc_root)
+    except OSError:
+        return None
+    for entry in entries:
+        if not entry.isdigit():
+            continue
+        try:
+            with open(os.path.join(proc_root, entry, "cmdline"), "rb") as f:
+                argv0 = f.read().split(b"\0", 1)[0].decode(errors="replace")
+        except OSError:
+            continue
+        if DAEMON_PATH_RE.match(argv0):
+            return int(entry)
+    return None
+
+
+def read_rss_bytes(pid: int, proc_root: str = "/proc") -> Optional[int]:
+    """Return the resident memory of a process in bytes."""
+    try:
+        with open(os.path.join(proc_root, str(pid), "status")) as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
 
 class Metric(Enum):
     NUM_SYNCING = "num_syncing"
@@ -82,6 +124,21 @@ class DropboxInterface:
             pass
         return None
 
+    def query_daemon_pid(self) -> Optional[int]:
+        return find_daemon_pid()
+
+    def query_daemon_memory_bytes(self) -> Optional[int]:
+        pid = find_daemon_pid()
+        return read_rss_bytes(pid) if pid else None
+
+    def query_restart_count(self) -> int:
+        """How often the entrypoint has restarted the daemon."""
+        try:
+            with open(RESTART_COUNT_FILE) as f:
+                return int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            return 0
+
     def query_version(self) -> Optional[str]:
         """Read the daemon version from VERSION file."""
         try:
@@ -145,6 +202,21 @@ class DropboxMonitor:
             states=[state.value for state in State.__members__.values()],
         )
 
+        self.daemon_up_gauge = Gauge(
+            "dropbox_daemon_up",
+            "Whether the Dropbox daemon process is running (1) or not (0)",
+        )
+
+        self.daemon_memory_gauge = Gauge(
+            "dropbox_daemon_memory_bytes",
+            "Resident memory of the Dropbox daemon",
+        )
+
+        self.daemon_restarts_gauge = Gauge(
+            "dropbox_daemon_restarts",
+            "Times the container has restarted the Dropbox daemon",
+        )
+
     def start(self) -> None:
         self.status_enum.state(State.STARTING.value)
         self.num_syncing_gauge.set_function(
@@ -156,6 +228,11 @@ class DropboxMonitor:
         self.num_uploading_gauge.set_function(
             partial(self.get_status, Metric.NUM_UPLOADING)
         )
+        self.daemon_up_gauge.set_function(lambda: 1 if self.is_healthy() else 0)
+        self.daemon_memory_gauge.set_function(
+            lambda: self.dropbox.query_daemon_memory_bytes() or 0
+        )
+        self.daemon_restarts_gauge.set_function(self.dropbox.query_restart_count)
 
         start_http_server(self.prom_port)
         self.logger.info("Started Prometheus server on port %d", self.prom_port)
@@ -183,6 +260,10 @@ class DropboxMonitor:
         else:
             raise ValueError(metric)
 
+    def is_healthy(self) -> bool:
+        """Healthy while the daemon process is running."""
+        return self.dropbox.query_daemon_pid() is not None
+
     def get_json_status(self) -> dict:
         """Build a JSON-serializable status dict for the /status endpoint."""
         # Trigger a refresh if stale
@@ -202,21 +283,16 @@ class DropboxMonitor:
         # Version
         version = self.dropbox.query_version()
 
-        # Memory usage from /proc
-        memory_mb = None
-        try:
-            with open("/proc/self/status") as f:
-                for line in f:
-                    if line.startswith("VmRSS:"):
-                        memory_mb = int(line.split()[1]) / 1024
-                        break
-        except Exception:
-            pass
+        # Memory usage of the daemon (not of this monitoring process)
+        memory_bytes = self.dropbox.query_daemon_memory_bytes()
+        memory_mb = memory_bytes / (1024 * 1024) if memory_bytes else None
+        self.restart_count = self.dropbox.query_restart_count()
 
         # Uptime
         uptime_seconds = int(time() - self.start_time)
 
         return {
+            "healthy": self.is_healthy(),
             "status": self.state.value,
             "raw_status": self.raw_status,
             "sync": {
@@ -234,6 +310,10 @@ class DropboxMonitor:
             "last_sync": self.last_sync_time,
             "last_error": self.last_error,
             "excluded_folders": excluded or [],
+            "image": {
+                "version": os.environ.get("IMAGE_VERSION") or None,
+                "revision": os.environ.get("IMAGE_REVISION") or None,
+            },
         }
 
     def parse_output(self, results: str) -> None:
@@ -318,26 +398,51 @@ class DropboxMonitor:
 
 
 class StatusHandler(BaseHTTPRequestHandler):
-    """HTTP handler for the /status JSON endpoint."""
+    """HTTP handler for the status page and the /status and /health APIs."""
 
     monitor = None  # type: Optional[DropboxMonitor]
+    webui_dir = WEBUI_DIR
 
     def do_GET(self):
-        if self.path == "/status" or self.path == "/status/":
-            data = self.monitor.get_json_status()
-            payload = json.dumps(data, indent=2)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.write(payload.encode())
-        elif self.path == "/health" or self.path == "/health/":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.write(b'{"ok":true}')
+        path = self.path.split("?", 1)[0]
+        if path in ("/status", "/status/"):
+            self.send_json(200, self.monitor.get_json_status())
+        elif path in ("/health", "/health/"):
+            healthy = self.monitor.is_healthy()
+            # "ok" is kept for clients of versions before 1.3.0
+            self.send_json(200 if healthy else 503, {"healthy": healthy, "ok": healthy})
+        elif path in WEBUI_FILES:
+            self.send_static(*WEBUI_FILES[path])
         else:
-            self.send_response(404)
-            self.end_headers()
+            self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
+
+    def send_json(self, code: int, data: dict) -> None:
+        payload = json.dumps(data, indent=2).encode()
+        self.send_body(code, "application/json", payload)
+
+    def send_static(self, name: str, content_type: str) -> None:
+        try:
+            with open(os.path.join(self.webui_dir, name), "rb") as f:
+                body = f.read()
+        except OSError:
+            self.send_body(404, "text/plain; charset=utf-8", b"Not found\n")
+            return
+        self.send_body(200, content_type, body)
+
+    def send_body(self, code: int, content_type: str, body: bytes) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'none'; script-src 'self'; style-src 'self'; "
+            "connect-src 'self'; img-src 'self'; frame-ancestors 'none'",
+        )
+        self.end_headers()
+        self.write(body)
 
     def write(self, data: bytes):
         try:
@@ -367,10 +472,11 @@ if __name__ == "__main__":
         "-i",
         "--min_poll_interval_sec",
         help="minimum interval for polling Dropbox (in seconds)",
+        type=int,
         default=5,
     )
-    parser.add_argument("-p", "--port", help="Prometheus port", default=8000)
-    parser.add_argument("--status-port", help="JSON status API port", default=8001)
+    parser.add_argument("-p", "--port", help="Prometheus port", type=int, default=8000)
+    parser.add_argument("--status-port", help="Status page and JSON API port", type=int, default=8001)
     parser.add_argument("--log_level", default="INFO")
     parser.add_argument("--global_log_level", default="INFO")
     args = parser.parse_args()
@@ -386,14 +492,14 @@ if __name__ == "__main__":
     dropbox = DropboxInterface(logger)
     monitor = DropboxMonitor(
         dropbox=dropbox,
-        min_poll_interval_sec=int(args.min_poll_interval_sec),
+        min_poll_interval_sec=args.min_poll_interval_sec,
         logger=logger,
         prom_port=args.port,
     )
     monitor.start()
 
     # Start JSON status API
-    start_status_server(monitor, int(args.status_port), logger)
+    start_status_server(monitor, args.status_port, logger)
 
     exit_event = Event()
     signal.signal(signal.SIGHUP, lambda _s, _f: exit_event.set())

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dropbox status</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Dropbox</h1>
+      <span id="state" class="pill">Loading…</span>
+    </header>
+    <p id="raw" class="raw"></p>
+
+    <section id="link-hint" class="notice" hidden>
+      This server isn't linked to a Dropbox account yet. Open the container log
+      and visit the link it shows to connect your account.
+    </section>
+    <section id="offline" class="notice bad" hidden>
+      Can't reach the status API. Is the container running?
+    </section>
+    <section id="error" class="notice bad" hidden></section>
+
+    <section class="counts" aria-label="Transfers">
+      <div class="count"><span class="label">Syncing</span><span id="syncing" class="value">–</span></div>
+      <div class="count"><span class="label">Downloading</span><span id="downloading" class="value">–</span></div>
+      <div class="count"><span class="label">Uploading</span><span id="uploading" class="value">–</span></div>
+    </section>
+
+    <dl class="details">
+      <dt>Account</dt><dd id="account">–</dd>
+      <dt>Last up to date</dt><dd id="last-sync">–</dd>
+      <dt>Excluded folders</dt><dd id="excluded">–</dd>
+      <dt>Dropbox version</dt><dd id="version">–</dd>
+      <dt>Memory</dt><dd id="memory">–</dd>
+      <dt>Daemon restarts</dt><dd id="restarts">–</dd>
+      <dt>Monitoring uptime</dt><dd id="uptime">–</dd>
+      <dt>Image</dt><dd id="image">–</dd>
+    </dl>
+
+    <footer>
+      <span id="updated"></span>
+      <a href="status">JSON</a>
+      <a href="https://github.com/islamdiaa/dropbox-docker">dropbox-docker</a>
+    </footer>
+  </main>
+</body>
+</html>

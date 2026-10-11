@@ -25,6 +25,9 @@ set -euo pipefail
 # Environment variables: see README.md for full documentation.
 # ============================================================================
 
+IMAGE_REVISION="${IMAGE_REVISION:-unknown}"
+echo "dropbox-docker ${IMAGE_VERSION:-dev} (revision ${IMAGE_REVISION:0:7})"
+
 # --- Timezone Configuration ---
 if [ -z "${TZ:-}" ]; then
   TZ="$(cat /etc/timezone 2>/dev/null || echo 'UTC')"
@@ -381,20 +384,38 @@ EOF
 
 # Repair ownership of files in the sync folder that the daemon may not be
 # able to sync (e.g. created by root over SSH). Symlinks are changed
-# themselves (-h), never their targets.
+# themselves (-h), never their targets. Walking a large folder takes a
+# while, so this runs at idle CPU/IO priority in the background.
+OWNERSHIP_FIX_PID=""
 fix_ownership() {
   [[ -d /opt/dropbox/Dropbox ]] || return 0
+  # Don't start a new pass while the previous one is still walking the tree
+  if [[ -n "${OWNERSHIP_FIX_PID}" ]] && [[ -e "/proc/${OWNERSHIP_FIX_PID}" ]]; then
+    return 0
+  fi
   case "${OWNERSHIP_FIX_MODE}" in
     full)
-      find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" \
-        -exec chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null || true
+      nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" \
+        -exec chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null &
       ;;
     group-only)
-      find /opt/dropbox/Dropbox -not -group "${DROPBOX_GID}" \
-        -exec chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null || true
+      nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -group "${DROPBOX_GID}" \
+        -exec chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null &
+      ;;
+    *)
+      return 0
       ;;
   esac
+  OWNERSHIP_FIX_PID=$!
 }
+
+# Shared with monitoring.py, which reports it on /status and /metrics
+STATE_DIR=/run/dropbox-docker
+mkdir -p "${STATE_DIR}"
+record_restarts() {
+  echo "$1" > "${STATE_DIR}/restart_count"
+}
+record_restarts 0
 
 # --- Start Dropbox ---
 echo "Starting dropboxd ($(cat /opt/dropbox/bin/VERSION 2>/dev/null || echo 'unknown'))..."
@@ -482,6 +503,7 @@ while true; do
 
     gosu dropbox "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
+    record_restarts "${RESTART_COUNT}"
     LAST_STATUS=""
     pause 5
   fi
