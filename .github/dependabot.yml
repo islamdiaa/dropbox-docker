@@ -1,16 +1,22 @@
 version: 2
 updates:
 
-  # Keep Docker image up-to-dat
+  # Keep the base image up to date within its Ubuntu LTS release. Moving to
+  # a new LTS (e.g. 26.04) changes package names and needs a deliberate,
+  # tested change rather than an automatic bump.
   - package-ecosystem: docker
     directory: "/"
     schedule:
-      interval: daily
-      time: "04:00"
-    open-pull-requests-limit: 10
+      interval: weekly
+    ignore:
+      - dependency-name: ubuntu
+        update-types: ["version-update:semver-major"]
 
-  # Maintain dependencies for GitHub Actions
+  # Maintain dependencies for GitHub Actions, grouped into a single PR
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: "daily"
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
