@@ -19,8 +19,11 @@ services:
       # SKIP_SET_PERMISSIONS: "true"        # default, skips slow chown -R
       # DROPBOX_STARTUP_TIMEOUT: "600"      # more time for initial indexing
       # POLLING_INTERVAL: "30"              # less frequent status polling
+      # Shared NAS where Dropbox gets access via a group or ACL:
+      # OWNERSHIP_FIX_MODE: "group-only"    # or "disabled"; default "full"
     ports:
       - "17500:17500"  # LAN sync discovery (optional)
+    # These are the only capabilities the container needs
     cap_drop:
       - ALL
     cap_add:
