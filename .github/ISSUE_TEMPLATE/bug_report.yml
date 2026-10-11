@@ -1,0 +1,70 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check [Troubleshooting](https://github.com/islamdiaa/dropbox-docker#troubleshooting) first; the container log often says what's wrong.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: How do you run the container?
+      options:
+        - Unraid template
+        - Docker Compose
+        - docker run
+        - TrueNAS SCALE
+        - Synology / other NAS
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: account
+    attributes:
+      label: Dropbox account type
+      options:
+        - Personal (Basic, Plus, Essentials)
+        - Business / team
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Image version
+      description: The first line of the container log, e.g. `dropbox-docker 1.3.0 (revision c50898d)`
+      placeholder: dropbox-docker 1.3.0 (revision c50898d)
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Configuration
+      description: Your compose file, `docker run` command, or Unraid template settings (paths, UID/GID, variables).
+      render: yaml
+  - type: textarea
+    id: logs
+    attributes:
+      label: Container log
+      description: |
+        The log from the start of the container (`docker logs dropbox`).
+        **Remove any `cli_link_nonce` link first**: anyone who has it can link their account to your server.
+      render: shell
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I removed the `cli_link_nonce` link from the log
+          required: true
+        - label: I'm using the latest image
+          required: false

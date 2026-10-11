@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.3.0 — 2026-10-11
+
+### Added
+
+- **Status page.** With `ENABLE_MONITORING=true`, port 8001 serves a web page with the sync state, files syncing, downloading and uploading, account link, Dropbox version, memory and restarts. The Unraid template now enables monitoring, maps port 8001 and opens the page from the container's WebUI menu.
+- Prometheus metrics `dropbox_daemon_up`, `dropbox_daemon_memory_bytes` and `dropbox_daemon_restarts`.
+- The first log line shows the image version and revision, e.g. `dropbox-docker 1.3.0 (revision c50898d)`.
+
+### Fixes
+
+- **The Docker healthcheck works.** It used to pass whatever happened; it now reports unhealthy when the Dropbox daemon isn't running.
+- `/health` returns HTTP 503 and `{"healthy": false}` when the daemon isn't running, instead of always `{"ok": true}` (the `ok` key is kept for compatibility).
+- `/status` reports the daemon's memory, not the monitoring script's, and the real restart count instead of always 0.
+- The ownership repair pass runs in the background at idle CPU and disk priority, so walking a large folder no longer pauses supervision.
+- Issue templates no longer assign new issues to an unrelated GitHub user.
+
+### CI/CD and security
+
+- Pushing a `vX.Y.Z` tag publishes `X.Y.Z` and `X.Y` image tags and creates a GitHub release from this changelog.
+- CodeQL analysis of the Python code and workflows, and an OpenSSF Scorecard check of the repository.
+- Workflows are linted with actionlint, superseded pull request builds are cancelled, and checkouts no longer keep credentials.
+- Unit tests keep the README, `.env.example`, Unraid template and Dockerfile in sync. New E2E tests cover the healthcheck, status page, JSON API and metrics; unit test coverage is reported.
+- The image's Python dependencies moved to `requirements.txt`, so Dependabot keeps them updated.
+
+### Documentation
+
+- README rewritten: quick starts for Unraid, Compose and `docker run`, status page screenshots, a full configuration reference and an FAQ.
+- Issue forms, a contributing guide with the release process, and a security policy with private reporting.
+
 ## 1.2.0 — 2026-10-11
 
 ### Fixes

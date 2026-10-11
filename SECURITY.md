@@ -1,75 +1,78 @@
 # Security
 
-## Reporting vulnerabilities
+## Reporting a vulnerability
 
-If you find a security issue, please open a [GitHub issue](https://github.com/islamdiaa/dropbox-docker/issues). For sensitive disclosures, reach out privately before posting publicly.
+Please report security issues **privately** through [GitHub's private vulnerability reporting](https://github.com/islamdiaa/dropbox-docker/security/advisories/new) (Security tab → Report a vulnerability), not as a public issue. The aim is to respond within a week and release a fix or mitigation as soon as practical, with credit to you unless you prefer otherwise.
+
+Problems in the Dropbox client itself should go to [Dropbox's bug bounty program](https://hackerone.com/dropbox).
 
 ## Supported versions
 
-Use the latest image. Older tags are not patched.
+Only the latest release gets fixes. Use `latest` or the newest `X.Y.Z` tag.
 
 | Tag | Supported |
 |---|---|
-| `latest` | Yes |
-| Dated tags (e.g., `20260222`) | Best-effort |
-| Older tags | No |
+| `latest`, newest `X.Y.Z` / `X.Y` | Yes |
+| Older version tags, dated tags (e.g. `20261001`), commit tags | No |
 
 ## What this project controls
 
-This container downloads and runs the official Dropbox daemon binary from `dropbox.com`. We do not modify the daemon itself. Security of the Dropbox sync protocol and client is Dropbox's responsibility.
+This container downloads and runs the official Dropbox daemon from `dropbox.com`, unmodified. The security of the Dropbox client and sync protocol is Dropbox's responsibility.
 
 What we control:
-- The base image and its system packages
-- The entrypoint script (process management, permissions, signal handling)
-- The monitoring script (Prometheus metrics, JSON status API)
-- The CI pipeline (linting, scanning, publishing)
 
-The CI pipeline runs Trivy vulnerability scans on every build and fails on CRITICAL/HIGH findings.
+- The base image (Ubuntu 24.04 LTS) and its packages
+- The entrypoint (settings, permissions, process supervision, signal handling)
+- The healthcheck
+- The monitoring service: status page, JSON API and Prometheus metrics
+- The CI pipeline that builds, tests, scans and publishes the image
 
 ## Trust model
 
-### Runtime binary downloads
+### Runtime downloads
 
-The container downloads two files from Dropbox at startup:
+At startup the container downloads two files from Dropbox over HTTPS:
 
-1. **Dropbox daemon** — downloaded from `https://www.dropbox.com/download?plat=lnx.x86_64` via HTTPS
-2. **Dropbox CLI script** — downloaded from `https://www.dropbox.com/download?dl=packages/dropbox.py` via HTTPS
+1. **The Dropbox daemon** from `https://www.dropbox.com/download?plat=lnx.x86_64`
+2. **The Dropbox CLI script** from `https://www.dropbox.com/download?dl=packages/dropbox.py`
 
-Dropbox does not publish checksums or GPG signatures for their Linux client. This means we cannot verify the integrity of the downloaded binary beyond the HTTPS transport security. If `dropbox.com` or its CDN is compromised, a malicious binary could be installed.
+Dropbox doesn't publish checksums or signatures for its Linux client, so integrity can't be verified beyond TLS. If `dropbox.com` or its CDN were compromised, a malicious client could be installed.
 
-**Mitigations:**
-- Downloads use HTTPS with certificate verification (`curl -fsSL`)
-- The daemon runs as a non-root user (via `gosu`), limiting the blast radius of a compromised binary
-- Setting `DROPBOX_SKIP_UPDATE` pins the binary to whatever version is already installed, avoiding re-downloads
-- Trivy scans the base image for known vulnerabilities on every build
+Mitigations:
+
+- Downloads use HTTPS with certificate verification (`curl -fsSL`).
+- The daemon runs as an unprivileged user (via `gosu`), limiting what a compromised client could do.
+- `DROPBOX_SKIP_UPDATE` keeps the installed client instead of downloading a new one.
 
 ### Container privileges
 
-- The entrypoint runs as root (required for UID/GID remapping via `usermod`/`groupadd`)
-- The Dropbox daemon runs as the unprivileged `dropbox` user via `gosu`
-- The container does not require `--privileged` or `docker.sock`
-- Recommended: use `cap_drop: ALL` with minimal `cap_add` (see docker-compose.yml)
+- The entrypoint runs as root, which it needs to map UID/GID and fix permissions. The Dropbox daemon and the monitoring service run as the unprivileged `dropbox` user.
+- No `--privileged`, no `docker.sock`, no host networking.
+- The container works with `cap_drop: ALL` plus `CHOWN`, `SETUID`, `SETGID`, `FOWNER` and `DAC_OVERRIDE` (see `docker-compose.yml`). It doesn't need `KILL`.
+- The ownership repair pass changes symlinks themselves (`chown -h`), never their targets.
 
 ### Input validation
 
-All user-supplied environment variables are validated:
-- `TZ` — checked against a character allowlist before use in file paths
-- `DROPBOX_UID` / `DROPBOX_GID` — validated as numeric integers
-- `POLLING_INTERVAL` — validated as a positive integer
+Every setting is validated before use:
+
+- `TZ` is checked against a character allowlist before it's used in a file path.
+- `DROPBOX_UID`, `DROPBOX_GID` and all interval, timeout and count settings must be numbers.
+- `OWNERSHIP_FIX_MODE` must be one of the documented values.
+- Nothing from the environment is passed to `eval` or a shell.
 
 ### Monitoring endpoints
 
-When `ENABLE_MONITORING=true`, two HTTP servers bind to `0.0.0.0`:
-- Port 8000: Prometheus metrics (sync counts, memory, restart count)
-- Port 8001: JSON status API (`/status`, `/health`)
+With `ENABLE_MONITORING=true`, two HTTP servers listen on all interfaces inside the container:
 
-These endpoints are **unauthenticated** and intended for LAN/homelab use. They do not expose account email, display name, or other PII. If you need to restrict access, use firewall rules or bind to a specific interface via Docker networking.
+- Port 8001: status page, `/status` and `/health`
+- Port 8000: Prometheus `/metrics`
 
-### CI/CD security
+They're **unauthenticated** and meant for a trusted LAN. They don't expose your email or name, but they do show excluded folder names and the file named in the last sync error. The status page sends a strict Content-Security-Policy, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, loads nothing from other sites, and never shows the account link URL. Don't publish these ports to the internet; use a reverse proxy with authentication if you need remote access.
 
-- Docker Hub and GHCR credentials stored as GitHub Actions secrets (never in code)
-- Trivy vulnerability scanner fails builds on CRITICAL/HIGH findings
-- ShellCheck enforced on the entrypoint script
-- hadolint enforced on the Dockerfile
-- Dependabot monitors base image and GitHub Actions dependencies daily
-- Third-party actions pinned to specific versions (not floating tags)
+### Supply chain and CI
+
+- Every image is built, tested end to end and scanned with Trivy (CRITICAL/HIGH with a fix available fail the build) **before** it's published. Pull requests run the same checks.
+- CodeQL analyzes the Python code and the workflows; OpenSSF Scorecard checks the repository.
+- All GitHub Actions are pinned to commit SHAs, workflows have read-only permissions by default, and checkouts don't keep credentials.
+- Dependabot updates the base image, actions and Python packages weekly.
+- Registry credentials are GitHub Actions secrets and are never used by pull request builds.

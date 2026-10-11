@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Unraid support thread
+    url: https://forums.unraid.net/topic/197487-support-dropbox-docker-reliable-headless-dropbox-for-unraid-islamdiaadropbox-docker/
+    about: Questions about running the container on Unraid
+  - name: Report a security vulnerability
+    url: https://github.com/islamdiaa/dropbox-docker/security/advisories/new
+    about: Please report security issues privately, not as public issues

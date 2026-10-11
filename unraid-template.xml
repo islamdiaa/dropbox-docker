@@ -30,11 +30,13 @@ If Dropbox asks you to link again after every restart, put the config on a direc
 &#xD;
 Problems? Check the container log first: it reports a sync folder Dropbox can't write to, and where your account actually syncs to.&#xD;
 &#xD;
-Features: process supervision, Docker HEALTHCHECK, JSON status API, Prometheus monitoring, telemetry crash fix, graceful shutdown, large account support.&#xD;
+Open the WebUI for a status page showing sync progress, account link, memory and restarts.&#xD;
+&#xD;
+Features: status page, process supervision, Docker HEALTHCHECK, JSON status API, Prometheus metrics, telemetry crash fix, graceful shutdown, large account support.&#xD;
 &#xD;
 By Islam ElTayar — https://itayar.com</Overview>
   <Category>Cloud: Backup:</Category>
-  <WebUI/>
+  <WebUI>http://[IP]:[PORT:8001]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/unraid-template.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/icon.png</Icon>
   <ExtraParams>--restart unless-stopped --ulimit nofile=1048576:1048576 --add-host telemetry.dropbox.com:127.0.0.1</ExtraParams>
@@ -43,6 +45,20 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateText/>
   <DonateLink/>
   <Requires/>
+  <Changes>
+### 1.3.0 (2026-10-11)
+- New status page: open the WebUI to see sync progress, account link, memory and restarts
+- Health check now turns unhealthy when Dropbox isn't running
+- Restart count and Dropbox memory are reported correctly; new Prometheus metrics
+- Ownership repair runs at low priority in the background
+
+### 1.2.0 (2026-10-11)
+- Fixed: account links but nothing syncs when Docker created the sync folder as root
+- Fixed: Dropbox was force-killed on every stop or update with the template's polling interval
+- Fixed: several Dropbox processes started without the KILL capability
+- Fixed: crash loop on the very first start
+- Warnings for /mnt/user paths; new Ownership repair setting
+  </Changes>
   <Config Name="Dropbox sync folder" Target="/opt/dropbox/Dropbox" Default="/mnt/disk1/Dropbox" Mode="rw" Description="Where your Dropbox files live. Must be a direct disk path (not /mnt/user)." Type="Path" Display="always" Required="true" Mask="false">/mnt/disk1/Dropbox</Config>
   <Config Name="Dropbox config" Target="/opt/dropbox/.dropbox" Default="/mnt/user/appdata/dropbox" Mode="rw" Description="Persistent config and account data. If Dropbox asks you to link again after restarts, use a direct path such as /mnt/cache/appdata/dropbox." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dropbox</Config>
   <Config Name="User ID" Target="DROPBOX_UID" Default="99" Mode="" Description="UID for file ownership (99 = nobody on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
@@ -53,8 +69,8 @@ By Islam ElTayar — https://itayar.com</Overview>
   <Config Name="Max restarts" Target="DROPBOX_MAX_RESTARTS" Default="20" Mode="" Description="How many times to restart the daemon on crash before giving up." Type="Variable" Display="advanced" Required="false" Mask="false">20</Config>
   <Config Name="Polling interval" Target="POLLING_INTERVAL" Default="30" Mode="" Description="Seconds between status checks." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
   <Config Name="Ownership repair" Target="OWNERSHIP_FIX_MODE" Default="full" Mode="" Description="full: chown files in the sync folder not owned by User ID. group-only: only set their group. disabled: never change ownership." Type="Variable" Display="advanced" Required="false" Mask="false">full</Config>
-  <Config Name="Enable monitoring" Target="ENABLE_MONITORING" Default="false" Mode="" Description="Enable Prometheus metrics (port 8000) and JSON status API (port 8001)." Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Enable monitoring" Target="ENABLE_MONITORING" Default="true" Mode="" Description="Serve the status page and JSON API (port 8001) and Prometheus metrics (port 8000)." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="LAN Sync" Target="17500" Default="17500" Mode="tcp" Description="Dropbox LAN sync discovery port." Type="Port" Display="advanced" Required="false" Mask="false">17500</Config>
   <Config Name="Prometheus" Target="8000" Default="" Mode="tcp" Description="Prometheus metrics port (only if monitoring enabled)." Type="Port" Display="advanced" Required="false" Mask="false"/>
-  <Config Name="Status API" Target="8001" Default="" Mode="tcp" Description="JSON status API port (only if monitoring enabled)." Type="Port" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Status page" Target="8001" Default="8001" Mode="tcp" Description="Status page (WebUI) and JSON API. Needs monitoring enabled." Type="Port" Display="always" Required="false" Mask="false">8001</Config>
 </Container>
