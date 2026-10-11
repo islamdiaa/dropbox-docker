@@ -20,3 +20,12 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+
+  # Python packages: requirements.txt (image) and tests/requirements-test.txt
+  - package-ecosystem: pip
+    directories: ["/", "/tests"]
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]

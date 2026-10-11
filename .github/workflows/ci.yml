@@ -13,6 +13,11 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request supersedes its running build
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   DOCKER_IMAGE_NAME: dropbox-docker
   TEST_IMAGE: dropbox-test:e2e
@@ -25,6 +30,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Lint Dockerfile
         uses: hadolint/hadolint-action@2332a7b74a6de0dda2e2221d575162eba76ba5e5 # v3.3.0
@@ -32,7 +39,12 @@ jobs:
           dockerfile: Dockerfile
 
       - name: ShellCheck scripts
-        run: shellcheck -x docker-entrypoint.sh tests/run_tests.sh tests/e2e/*.sh
+        run: shellcheck -x docker-entrypoint.sh healthcheck.sh tests/run_tests.sh tests/e2e/*.sh
+
+      - name: Lint workflows
+        run: |
+          docker run --rm -v "$PWD:/repo" --workdir /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -42,7 +54,7 @@ jobs:
       - name: Run unit tests
         run: |
           pip install -r tests/requirements-test.txt
-          pytest tests/unit/ -v --tb=short
+          pytest tests/unit/ -v --tb=short --cov=monitoring --cov-report=term-missing
 
   # Build, test and scan the image before anything is published, on pull
   # requests too, so a broken or vulnerable image never reaches users.
@@ -54,6 +66,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -117,7 +131,8 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
             type=sha,enable=true,priority=100,prefix=,suffix=,format=short
             type=schedule,pattern={{date 'YYYYMMDD'}}
           flavor: |
@@ -138,6 +153,34 @@ jobs:
             VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
             VCS_REF=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
           tags: ${{ steps.meta.outputs.tags }}
+
+  # Pushing a vX.Y.Z tag publishes X.Y.Z and X.Y images (above) and creates a
+  # GitHub release whose notes are that version's CHANGELOG.md section.
+  release:
+    needs: build-test-publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v v="$version" 'index($0, "## " v " ") == 1 {found=1; next} found && /^## / {exit} found' \
+            CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
+            --notes-file release-notes.md --verify-tag
 
   # Scheduled builds have no one watching them; open (or update) an issue so
   # a failure gets noticed instead of going unseen for months.

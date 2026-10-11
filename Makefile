@@ -3,6 +3,8 @@
 IMAGE_NAME ?= islamdiaa/dropbox-docker
 IMAGE_TAG  ?= dev
 
+SHELL_SCRIPTS = docker-entrypoint.sh healthcheck.sh tests/run_tests.sh tests/e2e/*.sh
+
 # Build the Docker image
 build:
 	docker build -t $(IMAGE_NAME):$(IMAGE_TAG) .
@@ -13,16 +15,16 @@ test: test-unit test-e2e
 # Run unit tests only (no Docker required)
 test-unit:
 	pip install -q -r tests/requirements-test.txt 2>/dev/null || pip install -q --break-system-packages -r tests/requirements-test.txt
-	python3 -m pytest tests/unit/ -v
+	python3 -m pytest tests/unit/ -v --cov=monitoring --cov-report=term-missing
 
-# Run E2E tests (requires Docker)
-test-e2e: build
+# Build the test image and run the E2E tests (requires Docker)
+test-e2e:
 	bash tests/run_tests.sh
 
 # Lint Dockerfile and shell scripts
 lint:
+	@command -v shellcheck >/dev/null 2>&1 && shellcheck -x $(SHELL_SCRIPTS) || echo "shellcheck not installed, skipping shell lint"
 	@command -v hadolint >/dev/null 2>&1 && hadolint Dockerfile || echo "hadolint not installed, skipping Dockerfile lint"
-	@command -v shellcheck >/dev/null 2>&1 && shellcheck docker-entrypoint.sh || echo "shellcheck not installed, skipping shell lint"
 
 # Remove test containers and images
 clean:
