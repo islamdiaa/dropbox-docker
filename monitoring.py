@@ -53,7 +53,8 @@ def read_rss_bytes(pid: int, proc_root: str = "/proc") -> Optional[int]:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1]) * 1024
     except (OSError, ValueError, IndexError):
-        pass
+        # The process exited between finding it and reading its status
+        return None
     return None
 
 
