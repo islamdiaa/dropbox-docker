@@ -64,6 +64,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      release_version: ${{ steps.release.outputs.version }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -122,6 +124,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # A release is a vX.Y.Z tag push, or a push to main whose CHANGELOG.md
+      # starts with a version that has no tag yet. Either way the image is
+      # also published as X.Y.Z and X.Y, and the release job tags it.
+      - name: Detect release
+        id: release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            version=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
+            if [ -n "$version" ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2>/dev/null; then
+              version=""
+            fi
+          fi
+          echo "Release version: ${version:-none}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
+
       - name: Docker meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         id: meta
@@ -131,8 +155,8 @@ jobs:
             ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ steps.release.outputs.version }},priority=900,enable=${{ steps.release.outputs.version != '' }}
+            type=raw,value=${{ steps.release.outputs.minor }},enable=${{ steps.release.outputs.version != '' }}
             type=sha,enable=true,priority=100,prefix=,suffix=,format=short
             type=schedule,pattern={{date 'YYYYMMDD'}}
           flavor: |
@@ -154,11 +178,11 @@ jobs:
             VCS_REF=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
           tags: ${{ steps.meta.outputs.tags }}
 
-  # Pushing a vX.Y.Z tag publishes X.Y.Z and X.Y images (above) and creates a
-  # GitHub release whose notes are that version's CHANGELOG.md section.
+  # Tag the release (unless it was a tag push) and create a GitHub release
+  # whose notes are that version's CHANGELOG.md section.
   release:
     needs: build-test-publish
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: needs.build-test-publish.outputs.release_version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -170,17 +194,18 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build-test-publish.outputs.release_version }}
         run: |
-          version="${TAG#v}"
+          version="$VERSION"
           awk -v v="$version" 'index($0, "## " v " ") == 1 {found=1; next} found && /^## / {exit} found' \
             CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
             echo "::error::CHANGELOG.md has no section for $version"
             exit 1
           fi
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" \
-            --notes-file release-notes.md --verify-tag
+          # Creates the v$version tag on this commit unless it already exists
+          gh release create "v$version" --repo "$GITHUB_REPOSITORY" --title "v$version" \
+            --notes-file release-notes.md --target "$GITHUB_SHA"
 
   # Scheduled builds have no one watching them; open (or update) an issue so
   # a failure gets noticed instead of going unseen for months.
