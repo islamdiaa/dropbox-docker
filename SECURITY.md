@@ -4,6 +4,8 @@
 
 Please report security issues **privately** through [GitHub's private vulnerability reporting](https://github.com/islamdiaa/dropbox-docker/security/advisories/new) (Security tab → Report a vulnerability), not as a public issue. The aim is to respond within a week and release a fix or mitigation as soon as practical, with credit to you unless you prefer otherwise.
 
+If that form isn't available, contact the maintainer privately through [itayar.com](https://itayar.com) instead.
+
 Problems in the Dropbox client itself should go to [Dropbox's bug bounty program](https://hackerone.com/dropbox).
 
 ## Supported versions
