@@ -53,17 +53,14 @@ Open a pull request against `main`. CI runs lint, unit tests, the E2E suite, a T
 
 ## Releases
 
-Maintainers release by tagging:
+Releases are automatic. To release a version:
 
-1. Make sure `CHANGELOG.md` has a `## X.Y.Z — YYYY-MM-DD` section for the release, and update `<Changes>` in `unraid-template.xml`.
-2. Tag the commit on `main` and push the tag:
-   ```bash
-   git tag vX.Y.Z
-   git push origin vX.Y.Z
-   ```
-3. CI builds, tests and scans the image, publishes `X.Y.Z` and `X.Y` tags to Docker Hub and GHCR, and creates a GitHub release from the changelog section.
+1. In a pull request, add a `## X.Y.Z — YYYY-MM-DD` section at the top of `CHANGELOG.md` with the changes since the last release, and the same version in `<Changes>` in `unraid-template.xml` (a unit test checks this).
+2. Merge it to `main`.
 
-Every push to `main` also publishes `latest`, and a scheduled build on the 1st of each month picks up Ubuntu security updates. If a scheduled build fails, CI opens an issue.
+CI notices that the newest changelog version has no tag yet. After the image is built, tested and scanned, it publishes `latest`, `X.Y.Z` and `X.Y` to Docker Hub and GHCR, tags the commit `vX.Y.Z` and creates a GitHub release with the changelog section as its notes. Pushing a `vX.Y.Z` tag by hand does the same.
+
+Every push to `main` publishes `latest`, and a scheduled build on the 1st of each month picks up Ubuntu security updates. If a scheduled build fails, CI opens an issue.
 
 ## Code of conduct
 
