@@ -18,6 +18,10 @@ set -euo pipefail
 #   6. Wait for readiness, then enter supervision loop
 #   7. On SIGTERM/SIGINT: forward signal to daemon, wait, exit cleanly
 #
+# Only CHOWN, SETUID, SETGID, FOWNER and DAC_OVERRIDE are needed, so the
+# container also works with `cap_drop: ALL`. In particular nothing here may
+# rely on CAP_KILL: root can't signal the dropbox user's processes without it.
+#
 # Environment variables: see README.md for full documentation.
 # ============================================================================
 
@@ -70,11 +74,34 @@ if ! grep -qF ":${DROPBOX_GID}:" /etc/group; then
   groupadd -g "${DROPBOX_GID}" dropbox
 fi
 
-# Validate polling interval
-if [[ ! "${POLLING_INTERVAL}" =~ ^[0-9]+$ ]]; then
-  echo "POLLING_INTERVAL not set to a valid number, defaulting to 5"
-  export POLLING_INTERVAL=5
-fi
+# Validate numeric settings, falling back to their defaults
+declare -A NUMERIC_DEFAULTS=(
+  [POLLING_INTERVAL]=5
+  [DROPBOX_MAX_RESTARTS]=5
+  [DROPBOX_RESTART_DELAY]=10
+  [DROPBOX_STARTUP_TIMEOUT]=300
+  [OWNERSHIP_FIX_INTERVAL]=360
+)
+for var in "${!NUMERIC_DEFAULTS[@]}"; do
+  if [[ ! "${!var:-}" =~ ^[0-9]+$ ]]; then
+    if [[ -n "${!var:-}" ]]; then
+      echo "${var} not set to a valid number, defaulting to ${NUMERIC_DEFAULTS[$var]}"
+    fi
+    printf -v "${var}" '%s' "${NUMERIC_DEFAULTS[$var]}"
+    export "${var?}"
+  fi
+done
+
+# Validate ownership repair mode
+OWNERSHIP_FIX_MODE=$(echo "${OWNERSHIP_FIX_MODE:-full}" | tr '[:upper:]' '[:lower:]' | tr -d " ")
+case "${OWNERSHIP_FIX_MODE}" in
+  full|group-only|disabled) ;;
+  *)
+    echo "WARNING: OWNERSHIP_FIX_MODE '${OWNERSHIP_FIX_MODE}' is not one of full, group-only, disabled. Using full."
+    OWNERSHIP_FIX_MODE="full"
+    ;;
+esac
+export OWNERSHIP_FIX_MODE
 
 # Set dropbox account's UID/GID
 usermod -u "${DROPBOX_UID}" -g "${DROPBOX_GID}" --non-unique dropbox > /dev/null 2>&1
@@ -92,7 +119,58 @@ else
   chown -R "${DROPBOX_UID}:${DROPBOX_GID}" /opt/dropbox
 fi
 
-[[ -d /opt/dropbox/Dropbox ]] && chmod 755 /opt/dropbox/Dropbox
+# The daemon keeps its config and databases in ~/.dropbox. On a fresh volume
+# it doesn't exist yet: create it as the dropbox user, otherwise
+# lock_analytics below creates it as root and the daemon crash-loops with
+# "unable to open database file: /opt/dropbox/.dropbox/apex.sqlite3".
+if [[ ! -d /opt/dropbox/.dropbox ]]; then
+  install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" /opt/dropbox/.dropbox
+fi
+
+# --- Sync Folder ---
+echo "Ownership repair mode: ${OWNERSHIP_FIX_MODE}"
+if [[ -d /opt/dropbox/Dropbox ]]; then
+  [[ "${OWNERSHIP_FIX_MODE}" == "full" ]] && chmod 755 /opt/dropbox/Dropbox
+
+  # Docker creates a missing bind-mount source as root:root 755. The account
+  # then links fine but the daemon can't write a single file, so nothing ever
+  # syncs. Fix the top-level folder only; its contents are left alone.
+  if ! gosu dropbox test -w /opt/dropbox/Dropbox; then
+    case "${OWNERSHIP_FIX_MODE}" in
+      full)
+        chown "${DROPBOX_UID}:${DROPBOX_GID}" /opt/dropbox/Dropbox
+        echo "Sync folder was not writable by UID ${DROPBOX_UID}; changed its owner to ${DROPBOX_UID}:${DROPBOX_GID}"
+        ;;
+      group-only)
+        chgrp "${DROPBOX_GID}" /opt/dropbox/Dropbox
+        chmod g+rwx /opt/dropbox/Dropbox
+        echo "Sync folder was not writable by UID ${DROPBOX_UID}; gave group ${DROPBOX_GID} write access"
+        ;;
+    esac
+  fi
+  if gosu dropbox test -w /opt/dropbox/Dropbox; then
+    echo "Sync folder: /opt/dropbox/Dropbox (writable by UID ${DROPBOX_UID})"
+  else
+    echo "ERROR: Sync folder /opt/dropbox/Dropbox is not writable by UID ${DROPBOX_UID}."
+    echo "ERROR: Dropbox will link but cannot sync. Fix the folder's permissions on the host,"
+    echo "ERROR: or set DROPBOX_UID/DROPBOX_GID to match its owner."
+  fi
+fi
+
+# Dropbox doesn't support FUSE filesystems such as Unraid's /mnt/user share
+# layer: the sync folder fails outright, and SQLite databases in the config
+# folder are unreliable there.
+if [[ -d /opt/dropbox/Dropbox ]] && \
+   [[ "$(findmnt -n -o FSTYPE -T /opt/dropbox/Dropbox 2>/dev/null || true)" == fuse* ]]; then
+  echo "WARNING: The sync folder is on a FUSE filesystem ($(findmnt -n -o FSTYPE -T /opt/dropbox/Dropbox))."
+  echo "WARNING: Dropbox does not support this and will not sync. On Unraid, use a direct path"
+  echo "WARNING: such as /mnt/disk1/Dropbox or /mnt/cache/Dropbox instead of /mnt/user/Dropbox."
+fi
+if [[ "$(findmnt -n -o FSTYPE -T /opt/dropbox/.dropbox 2>/dev/null || true)" == fuse* ]]; then
+  echo "WARNING: The Dropbox config folder is on a FUSE filesystem ($(findmnt -n -o FSTYPE -T /opt/dropbox/.dropbox))."
+  echo "WARNING: If Dropbox asks you to link again after restarts, move it to a direct path,"
+  echo "WARNING: e.g. /mnt/cache/appdata/dropbox instead of /mnt/user/appdata/dropbox on Unraid."
+fi
 
 # --- Clean Stale Files ---
 rm -f /opt/dropbox/.dropbox/command_socket \
@@ -129,6 +207,11 @@ fi
 # before each daemon restart, since the daemon recreates these dirs.
 lock_analytics() {
   for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
+    # Only the analytics folders themselves may be root-owned; the daemon
+    # must still be able to write everything else under analytics_root.
+    if [[ ! -d "${analytics_root}" ]]; then
+      install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" "${analytics_root}"
+    fi
     for dir in events ssa_events sentry_exceptions; do
       rm -rf "${analytics_root:?}/${dir:?}/"* 2>/dev/null
       mkdir -p "${analytics_root}/${dir}"
@@ -184,13 +267,16 @@ if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; t
 
         echo "Downloading Dropbox $Latest..."
         tmpdir=$(mktemp -d)
-        curl -fsSL "$DL" | tar xzf - -C "$tmpdir"
-        echo "Installing new version..."
-        rm -rf /opt/dropbox/bin/*
-        mv "$tmpdir"/.dropbox-dist/* /opt/dropbox/bin/
+        if curl -fsSL "$DL" | tar xzf - -C "$tmpdir"; then
+          echo "Installing new version..."
+          rm -rf /opt/dropbox/bin/*
+          mv "$tmpdir"/.dropbox-dist/* /opt/dropbox/bin/
+          find /opt/dropbox/bin/ -type f -name "*.so" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} \; -exec chmod a+rx {} \;
+          echo "Dropbox updated to v$Latest"
+        else
+          echo "WARNING: Download of Dropbox $Latest failed. Keeping installed version ($Current)."
+        fi
         rm -rf "$tmpdir"
-        find /opt/dropbox/bin/ -type f -name "*.so" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} \; -exec chmod a+rx {} \;
-        echo "Dropbox updated to v$Latest"
       else
         echo "Dropbox is up-to-date"
       fi
@@ -198,9 +284,24 @@ if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; t
   fi
 fi
 
+if [[ ! -x /opt/dropbox/bin/dropboxd ]]; then
+  echo "ERROR: Dropbox is not installed and could not be downloaded. Check the container's internet access."
+  exit 1
+fi
+
 # --- Install CLI Script ---
-if [[ ! -f /opt/dropbox.py ]]; then
-  wget -q -O /opt/dropbox.py "https://www.dropbox.com/download?dl=packages/dropbox.py" 2>/dev/null || echo "WARNING: Could not download Dropbox CLI script"
+# Download to a temporary file so a failed download doesn't leave an empty
+# script behind that is never retried.
+if [[ ! -s /opt/dropbox.py ]]; then
+  if wget -q -O /opt/dropbox.py.tmp "https://www.dropbox.com/download?dl=packages/dropbox.py" 2>/dev/null \
+     && [[ -s /opt/dropbox.py.tmp ]]; then
+    mv /opt/dropbox.py.tmp /opt/dropbox.py
+  else
+    rm -f /opt/dropbox.py.tmp
+    echo "WARNING: Could not download Dropbox CLI script"
+  fi
+fi
+if [[ ! -x /usr/bin/dropbox ]]; then
   echo "#!/bin/bash" > /usr/bin/dropbox
   echo 'python3 /opt/dropbox.py "$@"' >> /usr/bin/dropbox
   chmod +x /usr/bin/dropbox
@@ -211,16 +312,89 @@ echo ""
 # Set umask
 umask 002
 
-# --- Signal Handler ---
+# --- Process Helpers ---
 DROPBOX_PID=""
+
+# Whether the daemon is still running. Reads /proc instead of using
+# `kill -0`, which fails with EPERM when root lacks CAP_KILL (e.g. with
+# `cap_drop: ALL`) and made a healthy daemon look dead (#11).
+daemon_running() {
+  local stat
+  [[ -n "${DROPBOX_PID}" ]] || return 1
+  { read -r stat < "/proc/${DROPBOX_PID}/stat"; } 2>/dev/null || return 1
+  # The state field follows the parenthesised command name; Z is a zombie.
+  stat="${stat##*) }"
+  [[ "${stat:0:1}" != "Z" ]]
+}
+
+# Send a signal to the daemon. Without CAP_KILL root can't signal another
+# UID, so fall back to sending it as the dropbox user.
+signal_daemon() {
+  kill -s "$1" "${DROPBOX_PID}" 2>/dev/null \
+    || gosu dropbox kill -s "$1" "${DROPBOX_PID}" 2>/dev/null \
+    || true
+}
+
+# Sleep without blocking signal handling: bash runs traps only after a
+# foreground command finishes, which could delay shutdown past the
+# `docker stop` timeout and get the daemon SIGKILLed.
+pause() {
+  sleep "$1" &
+  wait $! || true
+}
+
+# --- Signal Handler ---
 cleanup() {
   echo "Received shutdown signal. Stopping Dropbox daemon (PID: ${DROPBOX_PID})..."
-  kill -SIGTERM "${DROPBOX_PID}" 2>/dev/null
-  wait "${DROPBOX_PID}" 2>/dev/null
+  signal_daemon TERM
+  wait "${DROPBOX_PID}" 2>/dev/null || true
   echo "Dropbox daemon stopped."
   exit 0
 }
 trap cleanup SIGTERM SIGINT SIGHUP SIGQUIT
+
+# Log each linked account's sync folder once, and warn if Dropbox chose a
+# folder other than the mapped /opt/dropbox/Dropbox (e.g. a Dropbox Business
+# team folder), since those files would end up inside the config volume.
+report_sync_folders() {
+  python3 - <<'EOF' || true
+import json
+import sys
+
+try:
+    with open("/opt/dropbox/.dropbox/info.json") as f:
+        info = json.load(f)
+except (OSError, ValueError):
+    sys.exit(0)
+for kind, account in info.items():
+    if not isinstance(account, dict):
+        continue
+    path = account.get("path", "unknown")
+    team = " (team)" if account.get("is_team") else ""
+    print(f"Dropbox {kind} account{team} syncs to: {path}")
+    if path != "/opt/dropbox/Dropbox":
+        print(f"WARNING: {path} is not the mapped sync folder /opt/dropbox/Dropbox, so these files")
+        print("WARNING: are stored in the /opt/dropbox volume. To keep them on your own storage,")
+        print("WARNING: map /opt/dropbox itself to a host folder (see README: Dropbox Business).")
+EOF
+}
+
+# Repair ownership of files in the sync folder that the daemon may not be
+# able to sync (e.g. created by root over SSH). Symlinks are changed
+# themselves (-h), never their targets.
+fix_ownership() {
+  [[ -d /opt/dropbox/Dropbox ]] || return 0
+  case "${OWNERSHIP_FIX_MODE}" in
+    full)
+      find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" \
+        -exec chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null || true
+      ;;
+    group-only)
+      find /opt/dropbox/Dropbox -not -group "${DROPBOX_GID}" \
+        -exec chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null || true
+      ;;
+  esac
+}
 
 # --- Start Dropbox ---
 echo "Starting dropboxd ($(cat /opt/dropbox/bin/VERSION 2>/dev/null || echo 'unknown'))..."
@@ -242,11 +416,11 @@ while [[ $STARTUP_ELAPSED -lt ${DROPBOX_STARTUP_TIMEOUT} ]]; do
     echo "Dropbox daemon is ready (took ${STARTUP_ELAPSED}s)"
     break
   fi
-  if ! kill -0 "${DROPBOX_PID}" 2>/dev/null; then
+  if ! daemon_running; then
     echo "WARNING: Dropbox daemon exited during startup"
     break
   fi
-  sleep 2
+  pause 2
   STARTUP_ELAPSED=$((STARTUP_ELAPSED + 2))
 done
 if [[ $STARTUP_ELAPSED -ge ${DROPBOX_STARTUP_TIMEOUT} ]]; then
@@ -255,26 +429,38 @@ fi
 
 # --- Main Supervision Loop ---
 RESTART_COUNT=0
-OWNERSHIP_CHECK_COUNTER=0
+LAST_OWNERSHIP_FIX=${SECONDS}
+LAST_STATUS=""
+SYNC_FOLDERS_REPORTED=false
 while true; do
-  if kill -0 "${DROPBOX_PID}" 2>/dev/null; then
-    # Daemon is running
+  if daemon_running; then
+    # Daemon is running. Log its status when it changes rather than on
+    # every poll, so the log stays readable.
     if [[ -f "/opt/dropbox/.dropbox/info.json" ]]; then
-      gosu dropbox dropbox status 2>/dev/null || true
+      if [[ "${SYNC_FOLDERS_REPORTED}" == "false" ]]; then
+        report_sync_folders
+        SYNC_FOLDERS_REPORTED=true
+      fi
+      STATUS=$(gosu dropbox dropbox status 2>/dev/null || true)
+      if [[ -n "${STATUS}" ]] && [[ "${STATUS}" != "${LAST_STATUS}" ]]; then
+        echo "${STATUS}"
+        LAST_STATUS="${STATUS}"
+      fi
     fi
 
-    # Fix ownership on Dropbox folder periodically (every 12 cycles ~= every 6 min at default 30s interval)
-    # Files created by other users (e.g. root via SSH) won't sync until owned by the dropbox user
-    OWNERSHIP_CHECK_COUNTER=$((OWNERSHIP_CHECK_COUNTER + 1))
-    if [[ $OWNERSHIP_CHECK_COUNTER -ge 12 ]]; then
-      find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null || true
-      OWNERSHIP_CHECK_COUNTER=0
+    # Fix ownership on the Dropbox folder periodically (OWNERSHIP_FIX_INTERVAL,
+    # default 6 min). Files created by other users (e.g. root via SSH) won't
+    # sync until the dropbox user can access them.
+    if [[ "${OWNERSHIP_FIX_MODE}" != "disabled" ]] && \
+       [[ $((SECONDS - LAST_OWNERSHIP_FIX)) -ge ${OWNERSHIP_FIX_INTERVAL} ]]; then
+      fix_ownership
+      LAST_OWNERSHIP_FIX=${SECONDS}
     fi
 
     # Clean old temp files (scoped to dropbox temp dirs only)
     /usr/bin/find /tmp/ -maxdepth 1 -type d -name 'dropbox*' -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
 
-    sleep "${POLLING_INTERVAL}"
+    pause "${POLLING_INTERVAL}"
   else
     # Daemon crashed
     RESTART_COUNT=$((RESTART_COUNT + 1))
@@ -283,7 +469,7 @@ while true; do
       exit 1
     fi
     echo "WARNING: Dropbox daemon exited. Restart attempt ${RESTART_COUNT}/${DROPBOX_MAX_RESTARTS} in ${DROPBOX_RESTART_DELAY}s..."
-    sleep "${DROPBOX_RESTART_DELAY}"
+    pause "${DROPBOX_RESTART_DELAY}"
 
     # Clean stale sockets before restart
     rm -f /opt/dropbox/.dropbox/command_socket \
@@ -296,6 +482,7 @@ while true; do
 
     gosu dropbox "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
-    sleep 5
+    LAST_STATUS=""
+    pause 5
   fi
 done
