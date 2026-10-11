@@ -40,3 +40,27 @@ class TestEntrypointSyntax:
             cwd=repo_root
         )
         assert result.returncode == 0, f"Syntax error: {result.stderr}"
+
+
+class TestEntrypointRegressions:
+    """Static guards for bugs that are easy to reintroduce."""
+
+    def _script(self):
+        path = os.path.join(os.path.dirname(__file__), '..', '..', 'docker-entrypoint.sh')
+        with open(path) as f:
+            return f.read()
+
+    def test_no_kill_zero_liveness_check(self):
+        # `kill -0` on the daemon (another UID) needs CAP_KILL, so under
+        # `cap_drop: ALL` a running daemon looked dead and got duplicated (#11).
+        code = [line for line in self._script().splitlines()
+                if not line.lstrip().startswith('#')]
+        assert not any("kill -0" in line for line in code)
+
+    def test_config_dir_created_before_analytics_lockdown(self):
+        # lock_analytics creates ~/.dropbox as root if it doesn't exist yet,
+        # which made the daemon crash-loop on a fresh volume.
+        script = self._script()
+        create = script.index('install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" /opt/dropbox/.dropbox')
+        first_lock = script.index('\nlock_analytics\n')
+        assert create < first_lock

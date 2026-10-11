@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 echo "=== E2E Test: Environment Variables ==="
+# shellcheck source=tests/e2e/lib.sh
+source "$(dirname "$0")/lib.sh"
 CONTAINER_NAME="dropbox-test-env-$$"
 
 cleanup() {
@@ -9,10 +11,9 @@ cleanup() {
 trap cleanup EXIT
 
 # Test timezone
-docker run -d --name "$CONTAINER_NAME" \
+run_container "$CONTAINER_NAME" \
   -e TZ=America/New_York \
-  -e SKIP_SET_PERMISSIONS=true \
-  dropbox-test:e2e
+  -e SKIP_SET_PERMISSIONS=true
 
 sleep 5
 
