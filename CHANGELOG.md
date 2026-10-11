@@ -24,7 +24,7 @@ All notable changes to this project will be documented in this file.
 - CodeQL analysis of the Python code and workflows, and an OpenSSF Scorecard check of the repository.
 - Workflows are linted with actionlint, superseded pull request builds are cancelled, and checkouts no longer keep credentials.
 - Unit tests keep the README, `.env.example`, Unraid template and Dockerfile in sync. New E2E tests cover the healthcheck, status page, JSON API and metrics; unit test coverage is reported.
-- The image's Python dependencies moved to `requirements.txt`, so Dependabot keeps them updated.
+- The image's Python dependencies moved to `requirements.txt`, so Dependabot keeps them updated. Dependabot no longer manages the Ubuntu base image (it proposed the end-of-life 24.10); the monthly build pulls the latest 24.04 instead.
 
 ### Documentation
 

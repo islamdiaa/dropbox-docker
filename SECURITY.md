@@ -74,5 +74,5 @@ They're **unauthenticated** and meant for a trusted LAN. They don't expose your 
 - Every image is built, tested end to end and scanned with Trivy (CRITICAL/HIGH with a fix available fail the build) **before** it's published. Pull requests run the same checks.
 - CodeQL analyzes the Python code and the workflows; OpenSSF Scorecard checks the repository.
 - All GitHub Actions are pinned to commit SHAs, workflows have read-only permissions by default, and checkouts don't keep credentials.
-- Dependabot updates the base image, actions and Python packages weekly.
+- Dependabot updates actions and Python packages weekly; the monthly build pulls the latest Ubuntu 24.04 base image.
 - Registry credentials are GitHub Actions secrets and are never used by pull request builds.
