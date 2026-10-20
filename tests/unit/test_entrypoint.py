@@ -64,3 +64,28 @@ class TestEntrypointRegressions:
         create = script.index('install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" /opt/dropbox/.dropbox')
         first_lock = script.index('\nlock_analytics\n')
         assert create < first_lock
+
+    def test_lock_analytics_never_deletes_or_chmods_as_root(self):
+        # The dropbox user owns ~/.dropbox and can swap its subfolders for
+        # symlinks, so root must not rm/chown/chmod there by path.
+        script = self._script()
+        body = script[script.index("lock_analytics() {"):]
+        body = body[:body.index("\n}\n")]
+        for line in body.splitlines():
+            code = line.split("#", 1)[0]
+            for command in ("rm ", "chown ", "chmod "):
+                if command in code:
+                    assert "gosu dropbox" in code, f"root runs {command.strip()} in lock_analytics: {line.strip()}"
+
+    def test_version_check_does_not_download_the_client(self):
+        # Following the redirect (-L) with url_effective downloaded ~90 MB
+        # on every start just to read the version.
+        script = self._script()
+        line = next(l for l in script.splitlines() if "download?plat=lnx.x86_64" in l or "redirect_url" in l)
+        assert "redirect_url" in line and " -L" not in line
+
+    def test_network_calls_have_timeouts(self):
+        for line in self._script().splitlines():
+            code = line.split("#", 1)[0]
+            if code.strip().startswith(("curl ", "DL=$(curl")) or " curl " in code:
+                assert "--max-time" in code, f"curl without --max-time: {line.strip()}"

@@ -264,6 +264,7 @@ class DropboxMonitor:
                     self.raw_status = dropbox_result.strip()
                     self.parse_output(dropbox_result)
                 else:
+                    self.state = State.UNKNOWN
                     self.status_enum.state(State.UNKNOWN.value)
                     self.num_syncing = None
                     self.num_downloading = None

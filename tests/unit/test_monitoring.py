@@ -382,3 +382,10 @@ class TestCliTimeouts:
         dropbox = DropboxInterface(logger)
         assert dropbox.query_status() is None
         assert dropbox.query_exclude_list() is None
+
+
+class TestCliFailure:
+    def test_failed_status_read_is_unknown_not_starting(self, monitor, mock_dropbox):
+        mock_dropbox.query_status.return_value = None
+        monitor.get_status(Metric.NUM_SYNCING)
+        assert monitor.state == State.UNKNOWN
