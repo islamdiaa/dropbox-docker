@@ -272,14 +272,12 @@ class TestPrometheusMetrics:
 class TestStatusServer:
     @pytest.fixture
     def server(self, monitor, mock_dropbox):
-        from http.server import HTTPServer
         from threading import Thread
         mock_dropbox.query_status.return_value = "Up to date\n"
         mock_dropbox.query_account_info.return_value = {"personal": {}}
         mock_dropbox.query_exclude_list.return_value = []
         mock_dropbox.query_version.return_value = "272.4.3798"
-        monitoring.StatusHandler.monitor = monitor
-        httpd = HTTPServer(("127.0.0.1", 0), monitoring.StatusHandler)
+        httpd = monitoring.make_status_server(monitor, 0, "127.0.0.1")
         Thread(target=httpd.serve_forever, daemon=True).start()
         yield f"http://127.0.0.1:{httpd.server_address[1]}"
         httpd.shutdown()
@@ -333,3 +331,54 @@ class TestStatusServer:
         for path in ("/nope", "/../monitoring.py", "/webui/index.html"):
             code, _, _ = self._get(server + path)
             assert code == 404
+
+    def test_stalled_client_does_not_block_others(self, server):
+        import socket
+        host, port = server.replace("http://", "").split(":")
+        stalled = socket.create_connection((host, int(port)))
+        try:
+            stalled.sendall(b"GET /status HTTP/1.1\r\n")  # never finished
+            code, _, _ = self._get(server + "/health")
+            assert code == 200
+        finally:
+            stalled.close()
+
+
+class TestBusyDaemon:
+    def test_not_responding_keeps_last_state(self, monitor, mock_dropbox):
+        mock_dropbox.query_status.return_value = "Syncing 12 files\n"
+        monitor.get_status(Metric.NUM_SYNCING)
+        assert monitor.state == State.SYNCING
+
+        monitor.last_query_time = 0
+        mock_dropbox.query_status.return_value = "Dropbox isn't responding!\n"
+        assert monitor.get_status(Metric.NUM_SYNCING) == 12
+        assert monitor.state == State.SYNCING
+        assert monitor.raw_status == "Syncing 12 files"
+
+    def test_exclude_list_cached(self, monitor, mock_dropbox):
+        mock_dropbox.query_exclude_list.return_value = ["Photos"]
+        assert monitor.get_excluded_folders() == ["Photos"]
+        assert monitor.get_excluded_folders() == ["Photos"]
+        assert mock_dropbox.query_exclude_list.call_count == 1
+
+    def test_exclude_list_refreshed_after_ttl(self, monitor, mock_dropbox):
+        mock_dropbox.query_exclude_list.return_value = ["Photos"]
+        monitor.get_excluded_folders()
+        monitor.excluded_time -= monitoring.EXCLUDE_LIST_TTL_SEC + 1
+        mock_dropbox.query_exclude_list.return_value = ["Photos", "Archive"]
+        assert monitor.get_excluded_folders() == ["Photos", "Archive"]
+
+
+class TestCliTimeouts:
+    def test_status_cli_timeout_returns_none(self, logger, monkeypatch):
+        import subprocess
+
+        def hang(*args, **kwargs):
+            assert kwargs.get("timeout") == monitoring.CLI_TIMEOUT_SEC
+            raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+        monkeypatch.setattr(monitoring.subprocess, "run", hang)
+        dropbox = DropboxInterface(logger)
+        assert dropbox.query_status() is None
+        assert dropbox.query_exclude_list() is None

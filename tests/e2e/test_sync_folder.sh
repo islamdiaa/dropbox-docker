@@ -29,6 +29,20 @@ if ! docker exec "$CONTAINER_NAME" gosu dropbox touch /opt/dropbox/Dropbox/.writ
   exit 1
 fi
 echo "PASS: Sync folder is writable by the dropbox user"
+
+# Dropbox's own cache in the sync folder must survive a restart
+docker exec "$CONTAINER_NAME" gosu dropbox mkdir -p /opt/dropbox/Dropbox/.dropbox.cache/partial
+docker restart "$CONTAINER_NAME" > /dev/null
+# The log keeps the first run's lines; wait for the second start
+for _ in $(seq 1 60); do
+  [ "$(docker logs "$CONTAINER_NAME" 2>&1 | grep -c "Starting dropboxd")" -ge 2 ] && break
+  sleep 2
+done
+if ! docker exec "$CONTAINER_NAME" test -d /opt/dropbox/Dropbox/.dropbox.cache/partial; then
+  echo "FAIL: .dropbox.cache was deleted on restart"
+  exit 1
+fi
+echo "PASS: .dropbox.cache kept across restarts"
 docker rm -f "$CONTAINER_NAME" > /dev/null
 
 # With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the

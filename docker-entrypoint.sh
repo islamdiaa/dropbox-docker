@@ -132,7 +132,12 @@ fi
 
 # --- Sync Folder ---
 echo "Ownership repair mode: ${OWNERSHIP_FIX_MODE}"
-if [[ -d /opt/dropbox/Dropbox ]]; then
+# Root changes the sync folder below; never do that through a symlink,
+# which the dropbox user could have planted when /opt/dropbox/Dropbox
+# isn't a mount of its own.
+if [[ -L /opt/dropbox/Dropbox ]]; then
+  echo "WARNING: /opt/dropbox/Dropbox is a symlink; leaving its ownership and permissions alone."
+elif [[ -d /opt/dropbox/Dropbox ]]; then
   [[ "${OWNERSHIP_FIX_MODE}" == "full" ]] && chmod 755 /opt/dropbox/Dropbox
 
   # Docker creates a missing bind-mount source as root:root 755. The account
@@ -183,18 +188,17 @@ rm -f /opt/dropbox/.dropbox/command_socket \
 
 # Remove stale .dropbox directories from sync folder
 # These are leftover from previous installations and block the daemon
-# from writing its .dropbox marker file (PermissionDenied on unlinkat)
-if [[ -d /opt/dropbox/Dropbox/.dropbox ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox
-  echo "Removed stale .dropbox directory from sync folder"
-fi
-if [[ -d /opt/dropbox/Dropbox/.dropbox-dist ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox-dist
-  echo "Removed stale .dropbox-dist directory from sync folder"
-fi
-if [[ -d /opt/dropbox/Dropbox/.dropbox.cache ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox.cache
-  echo "Removed stale .dropbox.cache directory from sync folder"
+# from writing its .dropbox marker file (PermissionDenied on unlinkat).
+# (.dropbox.cache is Dropbox's own cache of partial downloads; keep it.)
+if [[ ! -L /opt/dropbox/Dropbox ]]; then
+  if [[ -d /opt/dropbox/Dropbox/.dropbox ]] && [[ ! -L /opt/dropbox/Dropbox/.dropbox ]]; then
+    rm -rf /opt/dropbox/Dropbox/.dropbox
+    echo "Removed stale .dropbox directory from sync folder"
+  fi
+  if [[ -d /opt/dropbox/Dropbox/.dropbox-dist ]] && [[ ! -L /opt/dropbox/Dropbox/.dropbox-dist ]]; then
+    rm -rf /opt/dropbox/Dropbox/.dropbox-dist
+    echo "Removed stale .dropbox-dist directory from sync folder"
+  fi
 fi
 
 # --- Block Dropbox Telemetry ---
@@ -208,20 +212,26 @@ fi
 
 # Function to lock down analytics directories. Called at startup and
 # before each daemon restart, since the daemon recreates these dirs.
+#
+# The dropbox user owns these folders' parent, so it can replace any of
+# them with a symlink. Root must therefore never delete, chown or chmod by
+# these paths: cleanup runs as the dropbox user, and the locked folders are
+# recreated with a plain mkdir, which never follows a symlink.
 lock_analytics() {
+  local analytics_root dir
   for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
-    # Only the analytics folders themselves may be root-owned; the daemon
-    # must still be able to write everything else under analytics_root.
-    if [[ ! -d "${analytics_root}" ]]; then
-      install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" "${analytics_root}"
+    # Only the analytics folders themselves are root-owned; the daemon must
+    # still be able to write everything else under analytics_root.
+    if [[ -L "${analytics_root}" ]] || [[ ! -d "${analytics_root}" ]]; then
+      gosu dropbox rm -f -- "${analytics_root}" 2>/dev/null || true
+      gosu dropbox mkdir -p -- "${analytics_root}" 2>/dev/null || true
     fi
     for dir in events ssa_events sentry_exceptions; do
-      rm -rf "${analytics_root:?}/${dir:?}/"* 2>/dev/null
-      mkdir -p "${analytics_root}/${dir}"
-      chown root:root "${analytics_root}/${dir}"
-      chmod 555 "${analytics_root}/${dir}"
+      gosu dropbox rm -rf -- "${analytics_root:?}/${dir:?}" 2>/dev/null || true
+      # Root-owned and read-only (umask 222 gives mode 555)
+      (umask 0222 && mkdir -- "${analytics_root}/${dir}") 2>/dev/null || true
     done
-    rm -f "${analytics_root}/metrics/store.bin" 2>/dev/null
+    gosu dropbox rm -f -- "${analytics_root}/metrics/store.bin" 2>/dev/null || true
   done
 }
 
@@ -384,11 +394,13 @@ EOF
 
 # Repair ownership of files in the sync folder that the daemon may not be
 # able to sync (e.g. created by root over SSH). Symlinks are changed
-# themselves (-h), never their targets. Walking a large folder takes a
-# while, so this runs at idle CPU/IO priority in the background.
+# themselves (-h), never their targets, and -execdir changes each entry from
+# inside its own directory, so swapping a parent directory for a symlink
+# mid-walk can't redirect root to a file elsewhere. Walking a large folder
+# takes a while, so this runs at idle CPU/IO priority in the background.
 OWNERSHIP_FIX_PID=""
 fix_ownership() {
-  [[ -d /opt/dropbox/Dropbox ]] || return 0
+  [[ -d /opt/dropbox/Dropbox ]] && [[ ! -L /opt/dropbox/Dropbox ]] || return 0
   # Don't start a new pass while the previous one is still walking the tree
   if [[ -n "${OWNERSHIP_FIX_PID}" ]] && [[ -e "/proc/${OWNERSHIP_FIX_PID}" ]]; then
     return 0
@@ -396,11 +408,11 @@ fix_ownership() {
   case "${OWNERSHIP_FIX_MODE}" in
     full)
       nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" \
-        -exec chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null &
+        -execdir chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null &
       ;;
     group-only)
       nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -group "${DROPBOX_GID}" \
-        -exec chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null &
+        -execdir chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null &
       ;;
     *)
       return 0
@@ -432,8 +444,10 @@ fi
 echo "Waiting for Dropbox daemon to initialize (timeout: ${DROPBOX_STARTUP_TIMEOUT}s)..."
 STARTUP_ELAPSED=0
 while [[ $STARTUP_ELAPSED -lt ${DROPBOX_STARTUP_TIMEOUT} ]]; do
-  if [[ -f "/opt/dropbox/.dropbox/info.json" ]] || \
-     [[ -S "/opt/dropbox/.dropbox/command_socket" ]]; then
+  # The daemon creates its command socket once it accepts commands (stale
+  # sockets were removed above). info.json survives restarts, so it says
+  # nothing about whether the daemon is up yet.
+  if [[ -S "/opt/dropbox/.dropbox/command_socket" ]]; then
     echo "Dropbox daemon is ready (took ${STARTUP_ELAPSED}s)"
     break
   fi
@@ -452,6 +466,7 @@ fi
 RESTART_COUNT=0
 LAST_OWNERSHIP_FIX=${SECONDS}
 LAST_STATUS=""
+UNRESPONSIVE_POLLS=0
 SYNC_FOLDERS_REPORTED=false
 while true; do
   if daemon_running; then
@@ -463,9 +478,20 @@ while true; do
         SYNC_FOLDERS_REPORTED=true
       fi
       STATUS=$(gosu dropbox dropbox status 2>/dev/null || true)
-      if [[ -n "${STATUS}" ]] && [[ "${STATUS}" != "${LAST_STATUS}" ]]; then
-        echo "${STATUS}"
-        LAST_STATUS="${STATUS}"
+      # The CLI gives up after 5s when the daemon is busy (e.g. indexing a
+      # large account). That's normal, so only report it if it lasts.
+      if [[ "${STATUS}" == "Dropbox isn't responding!" ]]; then
+        UNRESPONSIVE_POLLS=$((UNRESPONSIVE_POLLS + 1))
+        if [[ $((UNRESPONSIVE_POLLS * POLLING_INTERVAL)) -ge 300 ]] && [[ "${LAST_STATUS}" != "${STATUS}" ]]; then
+          echo "WARNING: Dropbox hasn't answered status requests for 5 minutes; it may be busy indexing."
+          LAST_STATUS="${STATUS}"
+        fi
+      else
+        UNRESPONSIVE_POLLS=0
+        if [[ -n "${STATUS}" ]] && [[ "${STATUS}" != "${LAST_STATUS}" ]]; then
+          echo "${STATUS}"
+          LAST_STATUS="${STATUS}"
+        fi
       fi
     fi
 
