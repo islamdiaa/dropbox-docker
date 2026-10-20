@@ -21,11 +21,13 @@ ENV LC_ALL="C.UTF-8"
 
 COPY requirements.txt /tmp/requirements.txt
 
-# Install runtime dependencies, create user, and clean up in a single layer
+# Install runtime dependencies and the Dropbox CLI script, create the user,
+# and clean up, in a single layer. The CLI is part of the image so it works
+# even when dropbox.com is unreachable at startup.
 # hadolint ignore=DL3008
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-   curl wget ca-certificates gosu tzdata \
+   curl ca-certificates gosu tzdata \
    libc6 libatomic1 libglapi-mesa \
    libxext6 libxdamage1 libxfixes3 \
    libxcb-glx0 libxcb-dri2-0 libxcb-dri3-0 \
@@ -34,6 +36,11 @@ RUN apt-get update \
    python3 python3-gpg python3-pip \
  && pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
  && rm /tmp/requirements.txt \
+ && curl -fsSL --retry 3 --max-time 120 -o /opt/dropbox.py "https://www.dropbox.com/download?dl=packages/dropbox.py" \
+ && python3 -m py_compile /opt/dropbox.py && rm -rf /opt/__pycache__ \
+ && printf '#!/bin/bash\nexec python3 /opt/dropbox.py "$@"\n' > /usr/bin/dropbox \
+ && chmod 644 /opt/dropbox.py \
+ && chmod 755 /usr/bin/dropbox \
  && apt-get clean \
  && rm -rf /var/lib/apt/lists/* \
  && mkdir -p /opt/dropbox \
@@ -66,7 +73,7 @@ ENV DROPBOX_MAX_RESTARTS=5
 ENV DROPBOX_RESTART_DELAY=10
 ENV DROPBOX_STARTUP_TIMEOUT=300
 ENV OWNERSHIP_FIX_MODE=full
-ENV OWNERSHIP_FIX_INTERVAL=360
+ENV OWNERSHIP_FIX_INTERVAL=86400
 
 COPY --chmod=755 docker-entrypoint.sh healthcheck.sh /
 COPY --chmod=644 monitoring.py /

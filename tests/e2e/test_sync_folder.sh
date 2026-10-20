@@ -29,6 +29,29 @@ if ! docker exec "$CONTAINER_NAME" gosu dropbox touch /opt/dropbox/Dropbox/.writ
   exit 1
 fi
 echo "PASS: Sync folder is writable by the dropbox user"
+
+# Dropbox's own cache in the sync folder must survive a restart
+docker exec "$CONTAINER_NAME" gosu dropbox mkdir -p /opt/dropbox/Dropbox/.dropbox.cache/partial
+# A file created by root while the container is down gets fixed at startup
+docker exec "$CONTAINER_NAME" touch /opt/dropbox/Dropbox/created-by-root
+docker restart "$CONTAINER_NAME" > /dev/null
+# The log keeps the first run's lines; wait for the second start
+for _ in $(seq 1 60); do
+  [ "$(docker logs "$CONTAINER_NAME" 2>&1 | grep -c "Dropbox daemon is ready")" -ge 2 ] && break
+  sleep 2
+done
+sleep 5
+if ! docker exec "$CONTAINER_NAME" test -d /opt/dropbox/Dropbox/.dropbox.cache/partial; then
+  echo "FAIL: .dropbox.cache was deleted on restart"
+  exit 1
+fi
+echo "PASS: .dropbox.cache kept across restarts"
+OWNER=$(docker exec "$CONTAINER_NAME" stat -c '%u' /opt/dropbox/Dropbox/created-by-root)
+if [ "$OWNER" != "99" ]; then
+  echo "FAIL: Root-owned file was not repaired at startup (owner $OWNER)"
+  exit 1
+fi
+echo "PASS: Ownership repaired at startup"
 docker rm -f "$CONTAINER_NAME" > /dev/null
 
 # With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the

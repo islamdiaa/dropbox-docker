@@ -31,18 +31,18 @@ What we control:
 
 ## Trust model
 
-### Runtime downloads
+### Downloads from Dropbox
 
-At startup the container downloads two files from Dropbox over HTTPS:
+Two files come from Dropbox over HTTPS:
 
-1. **The Dropbox daemon** from `https://www.dropbox.com/download?plat=lnx.x86_64`
-2. **The Dropbox CLI script** from `https://www.dropbox.com/download?dl=packages/dropbox.py`
+1. **The Dropbox daemon**, downloaded at startup from `https://www.dropbox.com/download?plat=lnx.x86_64` when a newer version is available
+2. **The Dropbox CLI script**, included in the image at build time from `https://www.dropbox.com/download?dl=packages/dropbox.py`
 
 Dropbox doesn't publish checksums or signatures for its Linux client, so integrity can't be verified beyond TLS. If `dropbox.com` or its CDN were compromised, a malicious client could be installed.
 
 Mitigations:
 
-- Downloads use HTTPS with certificate verification (`curl -fsSL`).
+- Downloads use HTTPS with certificate verification and time out instead of hanging.
 - The daemon runs as an unprivileged user (via `gosu`), limiting what a compromised client could do.
 - `DROPBOX_SKIP_UPDATE` keeps the installed client instead of downloading a new one.
 
@@ -51,7 +51,9 @@ Mitigations:
 - The entrypoint runs as root, which it needs to map UID/GID and fix permissions. The Dropbox daemon and the monitoring service run as the unprivileged `dropbox` user.
 - No `--privileged`, no `docker.sock`, no host networking.
 - The container works with `cap_drop: ALL` plus `CHOWN`, `SETUID`, `SETGID`, `FOWNER` and `DAC_OVERRIDE` (see `docker-compose.yml`). It doesn't need `KILL`.
-- The ownership repair pass changes symlinks themselves (`chown -h`), never their targets.
+- The ownership repair pass changes symlinks themselves (`chown -h`), never their targets, and changes each file from inside its own folder (`find -execdir`), so a folder swapped for a symlink mid-walk can't redirect it.
+- Root never deletes, chowns or chmods through paths inside folders the Dropbox user owns: cleanup there runs as the Dropbox user, and root only creates folders with `mkdir`, which never follows a symlink.
+- The Dropbox download is unpacked without its archived owners or setuid bits.
 
 ### Input validation
 

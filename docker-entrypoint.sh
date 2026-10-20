@@ -25,6 +25,10 @@ set -euo pipefail
 # Environment variables: see README.md for full documentation.
 # ============================================================================
 
+# Exit promptly on docker stop during startup (PID 1 ignores signals it has
+# no handler for). Replaced by the full handler once the daemon starts.
+trap 'echo "Received shutdown signal during startup."; exit 143' SIGTERM SIGINT SIGHUP SIGQUIT
+
 IMAGE_REVISION="${IMAGE_REVISION:-unknown}"
 echo "dropbox-docker ${IMAGE_VERSION:-dev} (revision ${IMAGE_REVISION:0:7})"
 
@@ -83,7 +87,13 @@ declare -A NUMERIC_DEFAULTS=(
   [DROPBOX_MAX_RESTARTS]=5
   [DROPBOX_RESTART_DELAY]=10
   [DROPBOX_STARTUP_TIMEOUT]=300
-  [OWNERSHIP_FIX_INTERVAL]=360
+  [OWNERSHIP_FIX_INTERVAL]=86400
+)
+# A zero polling interval would spin the CPU, and a tiny ownership interval
+# would walk the whole sync folder nonstop
+declare -A NUMERIC_MINIMUMS=(
+  [POLLING_INTERVAL]=1
+  [OWNERSHIP_FIX_INTERVAL]=60
 )
 for var in "${!NUMERIC_DEFAULTS[@]}"; do
   if [[ ! "${!var:-}" =~ ^[0-9]+$ ]]; then
@@ -91,8 +101,13 @@ for var in "${!NUMERIC_DEFAULTS[@]}"; do
       echo "${var} not set to a valid number, defaulting to ${NUMERIC_DEFAULTS[$var]}"
     fi
     printf -v "${var}" '%s' "${NUMERIC_DEFAULTS[$var]}"
-    export "${var?}"
+  elif [[ -n "${NUMERIC_MINIMUMS[$var]:-}" ]] && (( 10#${!var} < NUMERIC_MINIMUMS[$var] )); then
+    echo "${var}=${!var} is below the minimum of ${NUMERIC_MINIMUMS[$var]}, using ${NUMERIC_MINIMUMS[$var]}"
+    printf -v "${var}" '%s' "${NUMERIC_MINIMUMS[$var]}"
+  else
+    printf -v "${var}" '%s' "$((10#${!var}))"
   fi
+  export "${var?}"
 done
 
 # Validate ownership repair mode
@@ -132,7 +147,12 @@ fi
 
 # --- Sync Folder ---
 echo "Ownership repair mode: ${OWNERSHIP_FIX_MODE}"
-if [[ -d /opt/dropbox/Dropbox ]]; then
+# Root changes the sync folder below; never do that through a symlink,
+# which the dropbox user could have planted when /opt/dropbox/Dropbox
+# isn't a mount of its own.
+if [[ -L /opt/dropbox/Dropbox ]]; then
+  echo "WARNING: /opt/dropbox/Dropbox is a symlink; leaving its ownership and permissions alone."
+elif [[ -d /opt/dropbox/Dropbox ]]; then
   [[ "${OWNERSHIP_FIX_MODE}" == "full" ]] && chmod 755 /opt/dropbox/Dropbox
 
   # Docker creates a missing bind-mount source as root:root 755. The account
@@ -175,6 +195,16 @@ if [[ "$(findmnt -n -o FSTYPE -T /opt/dropbox/.dropbox 2>/dev/null || true)" == 
   echo "WARNING: e.g. /mnt/cache/appdata/dropbox instead of /mnt/user/appdata/dropbox on Unraid."
 fi
 
+# Dropbox watches every folder in the account with inotify. The limit is
+# set on the host, per user, and shared with other containers running as the
+# same UID (99 on Unraid).
+INOTIFY_WATCHES=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+if [[ "${INOTIFY_WATCHES}" =~ ^[0-9]+$ ]] && [[ ${INOTIFY_WATCHES} -gt 0 ]] && [[ ${INOTIFY_WATCHES} -lt 100000 ]]; then
+  echo "WARNING: The host allows ${INOTIFY_WATCHES} inotify watches per user, and Dropbox needs one per folder."
+  echo "WARNING: With more folders than that, Dropbox misses local changes. Raise fs.inotify.max_user_watches"
+  echo "WARNING: on the host (see README: Handling large accounts)."
+fi
+
 # --- Clean Stale Files ---
 rm -f /opt/dropbox/.dropbox/command_socket \
       /opt/dropbox/.dropbox/iface_socket \
@@ -183,18 +213,17 @@ rm -f /opt/dropbox/.dropbox/command_socket \
 
 # Remove stale .dropbox directories from sync folder
 # These are leftover from previous installations and block the daemon
-# from writing its .dropbox marker file (PermissionDenied on unlinkat)
-if [[ -d /opt/dropbox/Dropbox/.dropbox ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox
-  echo "Removed stale .dropbox directory from sync folder"
-fi
-if [[ -d /opt/dropbox/Dropbox/.dropbox-dist ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox-dist
-  echo "Removed stale .dropbox-dist directory from sync folder"
-fi
-if [[ -d /opt/dropbox/Dropbox/.dropbox.cache ]]; then
-  rm -rf /opt/dropbox/Dropbox/.dropbox.cache
-  echo "Removed stale .dropbox.cache directory from sync folder"
+# from writing its .dropbox marker file (PermissionDenied on unlinkat).
+# (.dropbox.cache is Dropbox's own cache of partial downloads; keep it.)
+if [[ ! -L /opt/dropbox/Dropbox ]]; then
+  if [[ -d /opt/dropbox/Dropbox/.dropbox ]] && [[ ! -L /opt/dropbox/Dropbox/.dropbox ]]; then
+    rm -rf /opt/dropbox/Dropbox/.dropbox
+    echo "Removed stale .dropbox directory from sync folder"
+  fi
+  if [[ -d /opt/dropbox/Dropbox/.dropbox-dist ]] && [[ ! -L /opt/dropbox/Dropbox/.dropbox-dist ]]; then
+    rm -rf /opt/dropbox/Dropbox/.dropbox-dist
+    echo "Removed stale .dropbox-dist directory from sync folder"
+  fi
 fi
 
 # --- Block Dropbox Telemetry ---
@@ -208,20 +237,26 @@ fi
 
 # Function to lock down analytics directories. Called at startup and
 # before each daemon restart, since the daemon recreates these dirs.
+#
+# The dropbox user owns these folders' parent, so it can replace any of
+# them with a symlink. Root must therefore never delete, chown or chmod by
+# these paths: cleanup runs as the dropbox user, and the locked folders are
+# recreated with a plain mkdir, which never follows a symlink.
 lock_analytics() {
+  local analytics_root dir
   for analytics_root in /opt/dropbox/.dropbox /opt/dropbox/.dropbox/.dropbox; do
-    # Only the analytics folders themselves may be root-owned; the daemon
-    # must still be able to write everything else under analytics_root.
-    if [[ ! -d "${analytics_root}" ]]; then
-      install -d -o "${DROPBOX_UID}" -g "${DROPBOX_GID}" "${analytics_root}"
+    # Only the analytics folders themselves are root-owned; the daemon must
+    # still be able to write everything else under analytics_root.
+    if [[ -L "${analytics_root}" ]] || [[ ! -d "${analytics_root}" ]]; then
+      gosu dropbox rm -f -- "${analytics_root}" 2>/dev/null || true
+      gosu dropbox mkdir -p -- "${analytics_root}" 2>/dev/null || true
     fi
     for dir in events ssa_events sentry_exceptions; do
-      rm -rf "${analytics_root:?}/${dir:?}/"* 2>/dev/null
-      mkdir -p "${analytics_root}/${dir}"
-      chown root:root "${analytics_root}/${dir}"
-      chmod 555 "${analytics_root}/${dir}"
+      gosu dropbox rm -rf -- "${analytics_root:?}/${dir:?}" 2>/dev/null || true
+      # Root-owned and read-only (umask 222 gives mode 555)
+      (umask 0222 && mkdir -- "${analytics_root}/${dir}") 2>/dev/null || true
     done
-    rm -f "${analytics_root}/metrics/store.bin" 2>/dev/null
+    gosu dropbox rm -f -- "${analytics_root}/metrics/store.bin" 2>/dev/null || true
   done
 }
 
@@ -233,81 +268,86 @@ lock_analytics() {
 lock_analytics
 
 # --- Update Dropbox ---
-if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ ! -f /opt/dropbox/bin/VERSION ]]; then
-  echo "Checking for latest Dropbox version..."
+# The client lives in /opt/dropbox/bin. A new version is unpacked next to it
+# and swapped in with renames, so a failed or interrupted update never
+# leaves a half-installed client behind.
+DROPBOX_BIN=/opt/dropbox/bin
+rm -rf "${DROPBOX_BIN}.new" "${DROPBOX_BIN}.old"
 
-  # Get download URL by following redirects
-  DL=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://www.dropbox.com/download?plat=lnx.x86_64" 2>/dev/null || echo "")
-
-  if [[ -z "$DL" ]]; then
-    echo "WARNING: Could not resolve Dropbox download URL. Skipping update."
+installed_version() {
+  if [[ -x "${DROPBOX_BIN}/dropboxd" ]] && [[ -s "${DROPBOX_BIN}/VERSION" ]]; then
+    cat "${DROPBOX_BIN}/VERSION"
   else
-    # Extract version from URL
-    Latest=$(echo "$DL" | grep -oP 'x86_64-\K[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+    echo "Not installed"
+  fi
+}
 
-    if [[ -z "$Latest" ]]; then
-      echo "WARNING: Could not parse version from URL: $DL"
+# Downloads and unpacks the client into DROPBOX_BIN.new. Run in the
+# background and waited on, so a stop signal is handled mid-download.
+download_client() {
+  set -o pipefail
+  mkdir -p "${DROPBOX_BIN}.new"
+  curl -fsS --connect-timeout 15 --speed-limit 10240 --speed-time 60 --max-time 1800 "$1" \
+    | tar xzf - -C "${DROPBOX_BIN}.new" --strip-components=1 --no-same-owner
+}
+
+Current=$(installed_version)
+if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "${Current}" == "Not installed" ]]; then
+  echo "Checking for latest Dropbox version..."
+  # The download link redirects to a versioned tarball: read the redirect
+  # target instead of downloading the whole client just to learn its version.
+  DL=$(curl -fsS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' \
+         "https://www.dropbox.com/download?plat=lnx.x86_64" 2>/dev/null) || DL=""
+  Latest=$(echo "$DL" | grep -oP 'x86_64-\K[0-9]+\.[0-9]+\.[0-9]+' || true)
+
+  if [[ -z "$Latest" ]]; then
+    echo "WARNING: Could not determine the latest Dropbox version. Skipping update."
+  else
+    echo "Latest   : $Latest"
+    echo "Installed: $Current"
+
+    if [[ "$Current" == "$Latest" ]]; then
+      echo "Dropbox is up-to-date"
     else
-      # Get current version
-      if [[ -f /opt/dropbox/bin/VERSION ]]; then
-        Current=$(cat /opt/dropbox/bin/VERSION)
-      else
-        Current="Not installed"
+      # Prevent Dropbox self-updates
+      if [[ "$Current" == "Not installed" ]] && [[ ! -d /opt/dropbox/.dropbox-dist ]]; then
+        install -dm0 /opt/dropbox/.dropbox-dist
+        chmod o-w /tmp
+        chmod g-w /tmp
       fi
 
-      echo "Latest   : $Latest"
-      echo "Installed: $Current"
-
-      if [[ "$Current" != "$Latest" ]]; then
-        # Prevent Dropbox self-updates
-        if [[ ! -d /opt/dropbox/bin ]]; then
-          mkdir -p /opt/dropbox/bin/ /tmp
-          install -dm0 /opt/dropbox/.dropbox-dist
-          chmod u-w /opt/dropbox/.dropbox-dist
-          chmod o-w /tmp
-          chmod g-w /tmp
-        fi
-
-        echo "Downloading Dropbox $Latest..."
-        tmpdir=$(mktemp -d)
-        if curl -fsSL "$DL" | tar xzf - -C "$tmpdir"; then
-          echo "Installing new version..."
-          rm -rf /opt/dropbox/bin/*
-          mv "$tmpdir"/.dropbox-dist/* /opt/dropbox/bin/
-          find /opt/dropbox/bin/ -type f -name "*.so" -exec chown "${DROPBOX_UID}:${DROPBOX_GID}" {} \; -exec chmod a+rx {} \;
-          echo "Dropbox updated to v$Latest"
+      echo "Downloading Dropbox $Latest..."
+      download_client "$DL" &
+      if wait $! \
+         && [[ -x "${DROPBOX_BIN}.new/dropboxd" ]] \
+         && [[ "$(cat "${DROPBOX_BIN}.new/VERSION" 2>/dev/null)" == "$Latest" ]]; then
+        echo "Installing new version..."
+        chmod -R u-s,g-s "${DROPBOX_BIN}.new"
+        chown -R "${DROPBOX_UID}:${DROPBOX_GID}" "${DROPBOX_BIN}.new"
+        if mountpoint -q "${DROPBOX_BIN}"; then
+          # A mounted bin folder can't be renamed; replace its contents
+          find "${DROPBOX_BIN}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          mv "${DROPBOX_BIN}.new"/* "${DROPBOX_BIN}"/
+          rm -rf "${DROPBOX_BIN}.new"
         else
-          echo "WARNING: Download of Dropbox $Latest failed. Keeping installed version ($Current)."
+          if [[ -e "${DROPBOX_BIN}" ]]; then
+            mv "${DROPBOX_BIN}" "${DROPBOX_BIN}.old"
+          fi
+          mv "${DROPBOX_BIN}.new" "${DROPBOX_BIN}"
+          rm -rf "${DROPBOX_BIN}.old"
         fi
-        rm -rf "$tmpdir"
+        echo "Dropbox updated to v$Latest"
       else
-        echo "Dropbox is up-to-date"
+        echo "WARNING: Download of Dropbox $Latest failed. Keeping installed version ($Current)."
+        rm -rf "${DROPBOX_BIN}.new"
       fi
     fi
   fi
 fi
 
-if [[ ! -x /opt/dropbox/bin/dropboxd ]]; then
+if [[ "$(installed_version)" == "Not installed" ]]; then
   echo "ERROR: Dropbox is not installed and could not be downloaded. Check the container's internet access."
   exit 1
-fi
-
-# --- Install CLI Script ---
-# Download to a temporary file so a failed download doesn't leave an empty
-# script behind that is never retried.
-if [[ ! -s /opt/dropbox.py ]]; then
-  if wget -q -O /opt/dropbox.py.tmp "https://www.dropbox.com/download?dl=packages/dropbox.py" 2>/dev/null \
-     && [[ -s /opt/dropbox.py.tmp ]]; then
-    mv /opt/dropbox.py.tmp /opt/dropbox.py
-  else
-    rm -f /opt/dropbox.py.tmp
-    echo "WARNING: Could not download Dropbox CLI script"
-  fi
-fi
-if [[ ! -x /usr/bin/dropbox ]]; then
-  echo "#!/bin/bash" > /usr/bin/dropbox
-  echo 'python3 /opt/dropbox.py "$@"' >> /usr/bin/dropbox
-  chmod +x /usr/bin/dropbox
 fi
 
 echo ""
@@ -384,11 +424,13 @@ EOF
 
 # Repair ownership of files in the sync folder that the daemon may not be
 # able to sync (e.g. created by root over SSH). Symlinks are changed
-# themselves (-h), never their targets. Walking a large folder takes a
-# while, so this runs at idle CPU/IO priority in the background.
+# themselves (-h), never their targets, and -execdir changes each entry from
+# inside its own directory, so swapping a parent directory for a symlink
+# mid-walk can't redirect root to a file elsewhere. Walking a large folder
+# takes a while, so this runs at idle CPU/IO priority in the background.
 OWNERSHIP_FIX_PID=""
 fix_ownership() {
-  [[ -d /opt/dropbox/Dropbox ]] || return 0
+  [[ -d /opt/dropbox/Dropbox ]] && [[ ! -L /opt/dropbox/Dropbox ]] || return 0
   # Don't start a new pass while the previous one is still walking the tree
   if [[ -n "${OWNERSHIP_FIX_PID}" ]] && [[ -e "/proc/${OWNERSHIP_FIX_PID}" ]]; then
     return 0
@@ -396,11 +438,11 @@ fix_ownership() {
   case "${OWNERSHIP_FIX_MODE}" in
     full)
       nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -user "${DROPBOX_UID}" \
-        -exec chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null &
+        -execdir chown -h "${DROPBOX_UID}:${DROPBOX_GID}" {} + 2>/dev/null &
       ;;
     group-only)
       nice -n 19 ionice -c 3 find /opt/dropbox/Dropbox -not -group "${DROPBOX_GID}" \
-        -exec chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null &
+        -execdir chgrp -h "${DROPBOX_GID}" {} + 2>/dev/null &
       ;;
     *)
       return 0
@@ -432,8 +474,10 @@ fi
 echo "Waiting for Dropbox daemon to initialize (timeout: ${DROPBOX_STARTUP_TIMEOUT}s)..."
 STARTUP_ELAPSED=0
 while [[ $STARTUP_ELAPSED -lt ${DROPBOX_STARTUP_TIMEOUT} ]]; do
-  if [[ -f "/opt/dropbox/.dropbox/info.json" ]] || \
-     [[ -S "/opt/dropbox/.dropbox/command_socket" ]]; then
+  # The daemon creates its command socket once it accepts commands (stale
+  # sockets were removed above). info.json survives restarts, so it says
+  # nothing about whether the daemon is up yet.
+  if [[ -S "/opt/dropbox/.dropbox/command_socket" ]]; then
     echo "Dropbox daemon is ready (took ${STARTUP_ELAPSED}s)"
     break
   fi
@@ -449,10 +493,24 @@ if [[ $STARTUP_ELAPSED -ge ${DROPBOX_STARTUP_TIMEOUT} ]]; then
 fi
 
 # --- Main Supervision Loop ---
+# RESTART_COUNT counts consecutive crashes (it resets once the daemon has
+# stayed up for STABLE_AFTER seconds); TOTAL_RESTARTS is reported to
+# monitoring.
 RESTART_COUNT=0
-LAST_OWNERSHIP_FIX=${SECONDS}
+TOTAL_RESTARTS=0
+STABLE_AFTER=600
+LAST_RESTART=${SECONDS}
 LAST_STATUS=""
+UNRESPONSIVE_SINCE=""
 SYNC_FOLDERS_REPORTED=false
+
+# Repair ownership once now, for files added while the container was down.
+# After that, passes run when Dropbox reports a file it can't sync, and as a
+# safety net every OWNERSHIP_FIX_INTERVAL seconds (default daily): walking a
+# large sync folder often would keep the disks busy (and awake on Unraid).
+[[ "${OWNERSHIP_FIX_MODE}" != "disabled" ]] && fix_ownership
+LAST_OWNERSHIP_FIX=${SECONDS}
+
 while true; do
   if daemon_running; then
     # Daemon is running. Log its status when it changes rather than on
@@ -463,19 +521,41 @@ while true; do
         SYNC_FOLDERS_REPORTED=true
       fi
       STATUS=$(gosu dropbox dropbox status 2>/dev/null || true)
-      if [[ -n "${STATUS}" ]] && [[ "${STATUS}" != "${LAST_STATUS}" ]]; then
-        echo "${STATUS}"
-        LAST_STATUS="${STATUS}"
+      # The CLI gives up after 5s when the daemon is busy (e.g. indexing a
+      # large account). That's normal, so only report it if it lasts.
+      if [[ "${STATUS}" == "Dropbox isn't responding!" ]]; then
+        UNRESPONSIVE_SINCE=${UNRESPONSIVE_SINCE:-${SECONDS}}
+        if [[ $((SECONDS - UNRESPONSIVE_SINCE)) -ge 300 ]] && [[ "${LAST_STATUS}" != "${STATUS}" ]]; then
+          echo "WARNING: Dropbox hasn't answered status requests for 5 minutes; it may be busy indexing."
+          LAST_STATUS="${STATUS}"
+        fi
+      else
+        UNRESPONSIVE_SINCE=""
+        if [[ -n "${STATUS}" ]] && [[ "${STATUS}" != "${LAST_STATUS}" ]]; then
+          echo "${STATUS}"
+          LAST_STATUS="${STATUS}"
+        fi
+      fi
+    else
+      STATUS=""
+    fi
+
+    # Repair ownership in the sync folder, so files created by other users
+    # (e.g. root over SSH) can sync: right away when Dropbox reports a file
+    # it can't sync (at most every 10 minutes), and otherwise every
+    # OWNERSHIP_FIX_INTERVAL seconds.
+    if [[ "${OWNERSHIP_FIX_MODE}" != "disabled" ]]; then
+      SINCE_FIX=$((SECONDS - LAST_OWNERSHIP_FIX))
+      if [[ ${SINCE_FIX} -ge ${OWNERSHIP_FIX_INTERVAL} ]] || \
+         { [[ "${STATUS}" == *"Can't sync"* ]] && [[ ${SINCE_FIX} -ge 600 ]]; }; then
+        fix_ownership
+        LAST_OWNERSHIP_FIX=${SECONDS}
       fi
     fi
 
-    # Fix ownership on the Dropbox folder periodically (OWNERSHIP_FIX_INTERVAL,
-    # default 6 min). Files created by other users (e.g. root via SSH) won't
-    # sync until the dropbox user can access them.
-    if [[ "${OWNERSHIP_FIX_MODE}" != "disabled" ]] && \
-       [[ $((SECONDS - LAST_OWNERSHIP_FIX)) -ge ${OWNERSHIP_FIX_INTERVAL} ]]; then
-      fix_ownership
-      LAST_OWNERSHIP_FIX=${SECONDS}
+    # A daemon that has stayed up a while no longer counts towards giving up
+    if [[ ${RESTART_COUNT} -gt 0 ]] && [[ $((SECONDS - LAST_RESTART)) -ge ${STABLE_AFTER} ]]; then
+      RESTART_COUNT=0
     fi
 
     # Clean old temp files (scoped to dropbox temp dirs only)
@@ -503,8 +583,11 @@ while true; do
 
     gosu dropbox "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
-    record_restarts "${RESTART_COUNT}"
+    TOTAL_RESTARTS=$((TOTAL_RESTARTS + 1))
+    LAST_RESTART=${SECONDS}
+    record_restarts "${TOTAL_RESTARTS}"
     LAST_STATUS=""
+    UNRESPONSIVE_SINCE=""
     pause 5
   fi
 done

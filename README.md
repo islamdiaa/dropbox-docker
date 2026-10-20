@@ -163,7 +163,7 @@ All configuration is through environment variables. None are required.
 | `DROPBOX_SKIP_UPDATE` | _(unset)_ | Set to anything to keep the installed Dropbox client instead of downloading the latest on start. |
 | `POLLING_INTERVAL` | `5` | Seconds between `dropbox status` checks. Status is logged only when it changes. |
 | `OWNERSHIP_FIX_MODE` | `full` | How the container repairs ownership in the sync folder. `full`: files not owned by `DROPBOX_UID` are changed to `DROPBOX_UID:DROPBOX_GID`. `group-only`: only the group is set to `DROPBOX_GID`; each file keeps its owner. `disabled`: ownership and permissions in the sync folder are never changed. |
-| `OWNERSHIP_FIX_INTERVAL` | `360` | Seconds between ownership repair passes. Each pass runs in the background at idle CPU and disk priority. |
+| `OWNERSHIP_FIX_INTERVAL` | `86400` | Ownership is repaired at startup, whenever Dropbox reports a file it can't sync, and every this many seconds as a safety net (minimum 60). Each pass walks the whole sync folder in the background at idle CPU and disk priority. |
 
 ### Reliability
 
@@ -255,13 +255,16 @@ With 500K+ files, a few things help:
 
 1. **Give it memory.** The daemon keeps an in-memory index; 4 GB is a reasonable starting point. The status page shows how much it uses.
 2. **Increase the startup timeout**, since initial indexing takes a while: `DROPBOX_STARTUP_TIMEOUT=600`.
-3. **Raise the inotify watch limit on the host.** The kernel default (8192) is too low:
-   ```bash
-   echo "fs.inotify.max_user_watches=1048576" >> /etc/sysctl.conf
-   sysctl -p
-   ```
+3. **Make sure the host allows enough inotify watches.** Dropbox needs one per folder in your account. The limit is set on the host, per user, and shared with every other container running as the same UID; the container log warns if it's below 100,000. Newer kernels scale the default with RAM, older ones use 8192.
+   - **Unraid:** set *Max Watches* in the Tips and Tweaks plugin (it survives reboots).
+   - **Other hosts:**
+     ```bash
+     echo "fs.inotify.max_user_watches=1048576" | sudo tee /etc/sysctl.d/90-inotify.conf
+     sudo sysctl --system
+     ```
 4. **Keep `SKIP_SET_PERMISSIONS=true`** (the default). A `chown -R` over a million files on every start is slow.
 5. **Use a longer polling interval** to save CPU: `POLLING_INTERVAL=30`.
+6. **Leave `OWNERSHIP_FIX_INTERVAL` at its daily default.** Each ownership pass reads every file's metadata, so frequent passes keep disks busy and, on Unraid, awake.
 
 ## Troubleshooting
 
@@ -276,6 +279,8 @@ You can also ask the daemon directly:
 ```bash
 docker exec dropbox gosu dropbox dropbox status
 ```
+
+**`Dropbox isn't responding!`** The command-line tool gives up after 5 seconds, which happens while the daemon is busy, e.g. indexing a large account. It isn't an error by itself; the log only warns if it lasts 5 minutes.
 
 **Dropbox asks to be linked again after a restart.** Make sure the config (`/opt/dropbox/.dropbox`, or `/opt/dropbox`) is on a persistent volume, and on Unraid on a direct path rather than `/mnt/user` (the log warns about this). Since 1.2.0, `docker stop` shuts the daemon down cleanly; older images could kill it mid-write when `POLLING_INTERVAL` was longer than Docker's 10-second stop timeout.
 

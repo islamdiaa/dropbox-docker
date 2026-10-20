@@ -46,6 +46,13 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.4.0 (2026-10-20)
+- Security: root never follows symlinks the Dropbox user could plant
+- Startup no longer downloads 90 MB just to check the version, and has network timeouts
+- Interrupted updates can't break the container any more
+- Keeps Dropbox's own .dropbox.cache; less log noise from "isn't responding"
+- Ownership repair at startup, on sync errors and daily, so array disks can sleep
+
 ### 1.3.0 (2026-10-11)
 - New status page: open the WebUI to see sync progress, account link, memory and restarts
 - Health check now turns unhealthy when Dropbox isn't running

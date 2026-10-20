@@ -1,14 +1,14 @@
 from argparse import ArgumentParser
 from enum import Enum
 from functools import partial
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import logging
 import os
 import re
 import signal
 import subprocess
-from threading import Thread, Event
+from threading import Event, Lock, Thread
 from time import time
 from typing import Optional
 
@@ -16,6 +16,12 @@ from prometheus_client import start_http_server, Enum as EnumMetric, Gauge  # ty
 
 # The daemon's executable, as launched by /opt/dropbox/bin/dropboxd
 DAEMON_PATH_RE = re.compile(r"^/opt/dropbox/bin/dropbox-lnx[^/]*/dropbox$")
+# The CLI itself gives up on the daemon after 5 seconds; this only guards
+# against the CLI process hanging
+CLI_TIMEOUT_SEC = 15
+# The excluded folder list changes rarely; don't ask the daemon on every request
+EXCLUDE_LIST_TTL_SEC = 60
+NOT_RESPONDING = "Dropbox isn't responding!"
 # Written by docker-entrypoint.sh each time it restarts the daemon
 RESTART_COUNT_FILE = "/run/dropbox-docker/restart_count"
 WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui")
@@ -85,7 +91,8 @@ class DropboxInterface:
     def query_status(self) -> Optional[str]:
         try:
             result = subprocess.run(
-                ["dropbox", "status"], capture_output=True, text=True
+                ["dropbox", "status"], capture_output=True, text=True,
+                timeout=CLI_TIMEOUT_SEC,
             )
             if result.stderr:
                 self.logger.warning("Dropbox status returned error: %s", result.stderr)
@@ -115,7 +122,8 @@ class DropboxInterface:
         """Get the list of excluded (selective sync) folders."""
         try:
             result = subprocess.run(
-                ["dropbox", "exclude", "list"], capture_output=True, text=True
+                ["dropbox", "exclude", "list"], capture_output=True, text=True,
+                timeout=CLI_TIMEOUT_SEC,
             )
             if result.stdout:
                 lines = result.stdout.strip().splitlines()
@@ -172,6 +180,10 @@ class DropboxMonitor:
         )
 
         self.last_query_time = 0
+        # Serializes refreshes: the status server handles requests in threads
+        self.refresh_lock = Lock()
+        self.excluded = None  # type: Optional[list]
+        self.excluded_time = 0.0
         self.num_syncing = None  # type: Optional[int]
         self.num_downloading = None  # type: Optional[int]
         self.num_uploading = None  # type: Optional[int]
@@ -239,18 +251,24 @@ class DropboxMonitor:
         self.logger.info("Started Prometheus server on port %d", self.prom_port)
 
     def get_status(self, metric: Metric) -> int:
-        now = time()
-        if now - self.last_query_time > self.min_poll_interval_sec:
-            self.last_query_time = now
-            dropbox_result = self.dropbox.query_status()
-            if dropbox_result:
-                self.raw_status = dropbox_result.strip()
-                self.parse_output(dropbox_result)
-            else:
-                self.status_enum.state(State.UNKNOWN.value)
-                self.num_syncing = None
-                self.num_downloading = None
-                self.num_uploading = None
+        with self.refresh_lock:
+            now = time()
+            if now - self.last_query_time > self.min_poll_interval_sec:
+                self.last_query_time = now
+                dropbox_result = self.dropbox.query_status()
+                if dropbox_result and dropbox_result.strip() == NOT_RESPONDING:
+                    # Busy daemon (e.g. indexing): keep the last known state
+                    # instead of flapping between it and "unknown"
+                    pass
+                elif dropbox_result:
+                    self.raw_status = dropbox_result.strip()
+                    self.parse_output(dropbox_result)
+                else:
+                    self.state = State.UNKNOWN
+                    self.status_enum.state(State.UNKNOWN.value)
+                    self.num_syncing = None
+                    self.num_downloading = None
+                    self.num_uploading = None
 
         if metric == Metric.NUM_SYNCING:
             return self.num_syncing or 0
@@ -260,6 +278,15 @@ class DropboxMonitor:
             return self.num_uploading or 0
         else:
             raise ValueError(metric)
+
+    def get_excluded_folders(self) -> Optional[list]:
+        with self.refresh_lock:
+            if self.excluded is None or time() - self.excluded_time > EXCLUDE_LIST_TTL_SEC:
+                excluded = self.dropbox.query_exclude_list()
+                if excluded is not None:
+                    self.excluded = excluded
+                    self.excluded_time = time()
+            return self.excluded
 
     def is_healthy(self) -> bool:
         """Healthy while the daemon process is running."""
@@ -279,7 +306,7 @@ class DropboxMonitor:
             account = {"linked": False}
 
         # Excluded folders
-        excluded = self.dropbox.query_exclude_list()
+        excluded = self.get_excluded_folders()
 
         # Version
         version = self.dropbox.query_version()
@@ -403,6 +430,8 @@ class StatusHandler(BaseHTTPRequestHandler):
 
     monitor = None  # type: Optional[DropboxMonitor]
     webui_dir = WEBUI_DIR
+    # Drop clients that open a connection and never finish their request
+    timeout = 10
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
@@ -456,10 +485,17 @@ class StatusHandler(BaseHTTPRequestHandler):
         pass
 
 
-def start_status_server(monitor: DropboxMonitor, port: int, logger: logging.Logger):
-    """Start the JSON status HTTP server in a background thread."""
+def make_status_server(monitor: DropboxMonitor, port: int, host: str = "0.0.0.0") -> ThreadingHTTPServer:
+    """Create the status page and JSON API server; each request gets a thread."""
     StatusHandler.monitor = monitor
-    server = HTTPServer(("0.0.0.0", port), StatusHandler)
+    server = ThreadingHTTPServer((host, port), StatusHandler)
+    server.daemon_threads = True
+    return server
+
+
+def start_status_server(monitor: DropboxMonitor, port: int, logger: logging.Logger):
+    """Start the status page and JSON API server in a background thread."""
+    server = make_status_server(monitor, port)
     thread = Thread(target=server.serve_forever, daemon=True)
     thread.start()
     logger.info("Started status API server on port %d", port)

@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.0 — 2026-10-20
+
+### Security
+
+- **Root no longer follows symlinks the Dropbox user can plant.** Before every daemon restart, the entrypoint (as root) emptied and chmodded analytics folders inside `~/.dropbox`. The Dropbox user owns that folder, so a compromised client could replace one with a symlink and make root delete or chmod whatever it pointed to, e.g. your synced files. Cleanup now runs as the Dropbox user, and the locked folders are recreated with a plain `mkdir`, which never follows a symlink.
+- The ownership repair changes each file from inside its own folder (`find -execdir`), so swapping a parent folder for a symlink mid-walk can't redirect it. Root never touches `/opt/dropbox/Dropbox` when it is a symlink.
+- Files unpacked from the Dropbox download don't keep their owner or setuid bits.
+
+### Fixes
+
+- **Startup no longer downloads the whole client just to check its version.** Every start fetched about 90 MB to read the version from the download URL; now it reads the redirect (a few hundred bytes).
+- **An interrupted update can't break the container any more.** The new client is unpacked next to the old one and swapped in with renames; an incomplete install is detected and replaced on the next start instead of failing forever.
+- **Network calls at startup have timeouts**, and `docker stop` works while the client downloads. A stalled connection used to hang startup indefinitely.
+- The Dropbox CLI is part of the image instead of being downloaded at startup, so status, health and the status page work even when dropbox.com is unreachable when the container starts.
+- `.dropbox.cache`, Dropbox's own cache of partial downloads in the sync folder, is no longer deleted on every start.
+- No more `Dropbox isn't running!` right after start: the container waits for the daemon's command socket instead of `info.json`, which survives restarts.
+- `Dropbox isn't responding!` (the CLI's 5-second timeout while the daemon is busy) is no longer logged on every poll; the log warns only if it lasts 5 minutes. The status page keeps showing the last known state meanwhile.
+- The status page server handles requests in parallel and drops clients that never finish a request; CLI calls have timeouts and the excluded folder list is cached.
+- Six crashes over the container's whole lifetime made it give up; the count now resets once the daemon has run for 10 minutes. `/status` and the metrics still report the total.
+- `POLLING_INTERVAL=0` spun the CPU; intervals now have minimums.
+
+### Changed
+
+- **Ownership repair runs at startup, when Dropbox reports a file it can't sync, and daily** (`OWNERSHIP_FIX_INTERVAL` now defaults to 86400 instead of 360). Each pass reads every file's metadata, so running it every 6 minutes kept large Dropbox folders' disks busy and Unraid array disks awake.
+- The log warns when the host's inotify watch limit is too low for large accounts. README guidance for raising it is updated (Unraid: Tips and Tweaks plugin).
+
 ## 1.3.0 — 2026-10-11
 
 ### Added
