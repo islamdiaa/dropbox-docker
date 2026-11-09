@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<CommunityApplications>
+  <Profile>
+Maintainer of Dropbox Docker: the official Dropbox headless daemon in a container built for reliable, hands-off sync on Unraid, including large accounts with a million files or more.
+
+Every release is built, tested end to end and vulnerability-scanned before it is published. For help, post in the support thread or open an issue on GitHub.
+  </Profile>
+  <Icon>https://raw.githubusercontent.com/islamdiaa/dropbox-docker/main/icon.png</Icon>
+  <WebPage>https://github.com/islamdiaa/dropbox-docker</WebPage>
+  <Forum>https://forums.unraid.net/topic/197487-support-dropbox-docker-reliable-headless-dropbox-for-unraid-islamdiaadropbox-docker/</Forum>
+</CommunityApplications>
