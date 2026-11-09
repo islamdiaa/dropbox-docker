@@ -81,9 +81,7 @@ fi
 
 # Look for existing group, if not found create dropbox with specified GID
 if ! grep -qF ":${DROPBOX_GID}:" /etc/group; then
-  usermod -g users dropbox
-  groupdel dropbox
-  groupadd -g "${DROPBOX_GID}" dropbox
+  groupmod -g "${DROPBOX_GID}" dropbox
 fi
 
 # Validate numeric settings, falling back to their defaults
@@ -126,8 +124,16 @@ case "${OWNERSHIP_FIX_MODE}" in
 esac
 export OWNERSHIP_FIX_MODE
 
-# Set dropbox account's UID/GID
-usermod -u "${DROPBOX_UID}" -g "${DROPBOX_GID}" --non-unique dropbox > /dev/null 2>&1
+# Set dropbox account's UID/GID. Edited in place rather than with usermod,
+# which walks the whole home directory (the sync folder included) to
+# re-own files: minutes of disk activity on a large account at every
+# container recreation, whatever SKIP_SET_PERMISSIONS and
+# OWNERSHIP_FIX_MODE say.
+sed -i -E "s/^(dropbox:[^:]*:)[0-9]+:[0-9]+:/\\1${DROPBOX_UID}:${DROPBOX_GID}:/" /etc/passwd
+if [[ "$(id -u dropbox 2>/dev/null)" != "${DROPBOX_UID}" ]] || [[ "$(id -g dropbox 2>/dev/null)" != "${DROPBOX_GID}" ]]; then
+  echo "ERROR: Could not set the dropbox user to UID ${DROPBOX_UID}, GID ${DROPBOX_GID}."
+  exit 1
+fi
 
 # --- Permissions ---
 SKIP_PERMS=$(echo "${SKIP_SET_PERMISSIONS:-true}" | tr '[:upper:]' '[:lower:]' | tr -d " ")

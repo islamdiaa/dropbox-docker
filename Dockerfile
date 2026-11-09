@@ -50,7 +50,9 @@ RUN apt-get update \
  && useradd --home-dir /opt/dropbox --comment "Dropbox Daemon Account" --user-group --shell /usr/sbin/nologin dropbox \
  && chown -R dropbox:dropbox /opt/dropbox
 
-VOLUME ["/opt/dropbox"]
+# No VOLUME for /opt/dropbox: with only .dropbox and Dropbox mapped (the
+# Unraid template), Docker created an anonymous volume holding the client
+# for every container, and each update left one behind.
 
 ARG VCS_REF=main
 ARG VERSION=""

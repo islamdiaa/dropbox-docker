@@ -46,7 +46,10 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
-### 1.4.2 (2026-11-09)
+### 1.5.0 (2026-11-09)
+- Fixed: every container update left an orphaned Docker volume (about 140 MB) behind
+- Fixed: starting after an update walked the whole sync folder before Dropbox started
+- New optional "Dropbox client" path keeps the client across updates
 - Fixed: the sync folder was reset to 755 on every start, removing group/other write access
 - Fixed: a hung or slow Dropbox status check could stall the watchdog or mark the container unhealthy
 - Timezones like EST5EDT are accepted; warning when UID/GID is 0
@@ -77,6 +80,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   </Changes>
   <Config Name="Dropbox sync folder" Target="/opt/dropbox/Dropbox" Default="/mnt/disk1/Dropbox" Mode="rw" Description="Where your Dropbox files live. Must be a direct disk path (not /mnt/user)." Type="Path" Display="always" Required="true" Mask="false">/mnt/disk1/Dropbox</Config>
   <Config Name="Dropbox config" Target="/opt/dropbox/.dropbox" Default="/mnt/user/appdata/dropbox" Mode="rw" Description="Persistent config and account data. If Dropbox asks you to link again after restarts, use a direct path such as /mnt/cache/appdata/dropbox." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/dropbox</Config>
+  <Config Name="Dropbox client" Target="/opt/dropbox/bin" Default="" Mode="rw" Description="Optional. Keeps the Dropbox client (about 150 MB) across container updates, e.g. /mnt/user/appdata/dropbox-client. Leave empty to download it again after each update." Type="Path" Display="advanced" Required="false" Mask="false"/>
   <Config Name="User ID" Target="DROPBOX_UID" Default="99" Mode="" Description="UID for file ownership (99 = nobody on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">99</Config>
   <Config Name="Group ID" Target="DROPBOX_GID" Default="100" Mode="" Description="GID for file ownership (100 = users on Unraid)." Type="Variable" Display="always" Required="false" Mask="false">100</Config>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>

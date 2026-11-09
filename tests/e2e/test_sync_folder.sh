@@ -66,6 +66,10 @@ docker rm -f "$CONTAINER_NAME" > /dev/null
 # With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the
 # problem reported loudly instead.
 docker volume rm "$VOLUME_NAME" > /dev/null
+# A file owned by the image's built-in dropbox UID: usermod used to re-own
+# such files across the whole sync folder when it changed the user's UID.
+IMAGE_UID=$(docker run --rm -v "$VOLUME_NAME:/opt/dropbox/Dropbox" --entrypoint bash "$IMAGE" -c \
+  'touch /opt/dropbox/Dropbox/owned-by-image-uid && chown dropbox:dropbox /opt/dropbox/Dropbox/owned-by-image-uid && id -u dropbox')
 run_container "$CONTAINER_NAME" \
   -v "$VOLUME_NAME:/opt/dropbox/Dropbox" \
   -e DROPBOX_UID=99 \
@@ -83,5 +87,11 @@ if ! docker logs "$CONTAINER_NAME" 2>&1 | grep -q "is not writable by UID 99"; t
   exit 1
 fi
 echo "PASS: OWNERSHIP_FIX_MODE=disabled leaves ownership alone and reports the problem"
+OWNER=$(docker exec "$CONTAINER_NAME" stat -c '%u' /opt/dropbox/Dropbox/owned-by-image-uid)
+if [ "$OWNER" != "$IMAGE_UID" ]; then
+  echo "FAIL: A file in the sync folder was re-owned from $IMAGE_UID to $OWNER with OWNERSHIP_FIX_MODE=disabled"
+  exit 1
+fi
+echo "PASS: Changing the dropbox user's UID does not re-own files in the sync folder"
 
 echo "=== Sync folder tests passed ==="
