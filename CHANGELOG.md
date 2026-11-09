@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.1 — 2026-11-09
+
+### Security
+
+- The image upgrades the packages that come with its Ubuntu base, so security fixes Ubuntu has already published are included even before the base image itself is rebuilt. This picks up `apt` 2.8.4ubuntu0.1 (CVE-2026-109518).
+
 ## 1.4.0 — 2026-10-20
 
 ### Security
