@@ -306,6 +306,16 @@ docker exec dropbox gosu dropbox dropbox exclude remove "/opt/dropbox/Dropbox/Ca
 **Can I sync more than one Dropbox account?**
 Run one container per account, each with its own config and sync folder.
 
+**Which image tag should I use?**
+
+| Tag | What you get |
+|---|---|
+| `latest` | The newest release. The default, and right for almost everyone. |
+| `stable` | The same image as `latest`. |
+| `X.Y` (e.g. `1.5`) | The newest release in that series, including monthly security rebuilds. |
+| `X.Y.Z` (e.g. `1.5.1`) | Exactly that release. Never changes, so it gets no security rebuilds. |
+| `development` | Every change as soon as it is merged, before it is released. Tested by CI, but may contain unfinished work. |
+
 **How do I update?**
 Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` is set. Your account stays linked as long as the config volume is kept.
 

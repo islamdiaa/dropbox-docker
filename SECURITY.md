@@ -10,12 +10,13 @@ Problems in the Dropbox client itself should go to [Dropbox's bug bounty program
 
 ## Supported versions
 
-Only the latest release gets fixes. Use `latest` or the newest `X.Y.Z` tag.
+Only the latest release gets fixes. Use `latest` (or `stable`, which is the same image) or the newest `X.Y.Z` tag.
 
 | Tag | Supported |
 |---|---|
-| `latest`, newest `X.Y` | Yes, including the monthly rebuild with Ubuntu's security updates |
+| `latest`, `stable`, newest `X.Y` | Yes, including the monthly rebuild with Ubuntu's security updates |
 | Newest `X.Y.Z` | Yes, but it is never rebuilt: it stays exactly as released |
+| `development` | No: it carries unreleased changes |
 | Older version tags, dated tags (e.g. `20261001`), commit tags | No |
 
 ## What this project controls
@@ -79,5 +80,5 @@ They're **unauthenticated** and meant for a trusted LAN. They don't expose your 
 - Every image is built, tested end to end and scanned with Trivy (CRITICAL/HIGH with a fix available fail the build) **before** it's published, and the image that is published is that same tested image, not a rebuild. Pull requests run the same checks.
 - CodeQL analyzes the Python code and the workflows; OpenSSF Scorecard checks the repository.
 - All GitHub Actions are pinned to commit SHAs, workflows have read-only permissions by default, and checkouts don't keep credentials.
-- Dependabot updates actions and Python packages weekly; the monthly build pulls the latest Ubuntu 24.04 base image and is published as `latest`, a dated tag and, when nothing in the image has changed since the last release, that release's `X.Y` tag.
+- Dependabot updates actions and Python packages weekly; the monthly build pulls the latest Ubuntu 24.04 base image and is published as `development`, a dated tag and, when nothing in the image has changed since the last release, as `latest`, `stable` and that release's `X.Y` tag.
 - Registry credentials are GitHub Actions secrets and are never used by pull request builds.

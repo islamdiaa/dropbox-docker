@@ -58,9 +58,11 @@ Releases are automatic. To release a version:
 1. In a pull request, add a `## X.Y.Z — YYYY-MM-DD` section at the top of `CHANGELOG.md` with the changes since the last release, and the same version in `<Changes>` in `unraid-template.xml` (a unit test checks this).
 2. Merge it to `main`.
 
-CI notices that the newest changelog version has no tag yet. After the image is built, tested and scanned, it publishes `latest`, `X.Y.Z` and `X.Y` to Docker Hub and GHCR, tags the commit `vX.Y.Z` and creates a GitHub release with the changelog section as its notes. Pushing a `vX.Y.Z` tag by hand does the same.
+CI notices that the newest changelog version has no tag yet. After the image is built, tested and scanned, it publishes `latest`, `stable`, `X.Y.Z` and `X.Y` to Docker Hub and GHCR, tags the commit `vX.Y.Z` and creates a GitHub release with the changelog section as its notes. Pushing a `vX.Y.Z` tag by hand does the same.
 
-Every push to `main` publishes `latest`, and a scheduled build on the 1st of each month picks up Ubuntu security updates. If a scheduled build fails, CI opens an issue.
+Every push to `main` publishes `development`; `latest` and `stable` only move with a release. Work on short-lived branches off `main` and open a pull request: `main` is the only long-lived branch, and the channels are image tags, not git branches.
+
+A scheduled build on the 1st of each month picks up Ubuntu security updates. If a scheduled build fails, CI opens an issue.
 
 ## Code of conduct
 
