@@ -121,9 +121,11 @@ jobs:
           fi
           echo "Release version: ${version:-none}"
           echo "Rebuilt minor tag: ${rebuild_minor:-none}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
-          echo "rebuild_minor=$rebuild_minor" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "minor=${version%.*}"
+            echo "rebuild_minor=$rebuild_minor"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Docker meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
