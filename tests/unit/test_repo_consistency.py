@@ -84,6 +84,13 @@ def test_changelog_versions_are_semver_and_descending():
     assert parsed == sorted(parsed, reverse=True)
 
 
+def test_base_image_packages_are_upgraded():
+    # Ubuntu ships security fixes before it rebuilds the base image; without
+    # an upgrade the scan failed on apt 2.8.3 (CVE-2026-109518) for days.
+    run = read("Dockerfile").split("\nRUN apt-get update", 1)[1].split("\n\n", 1)[0]
+    assert "apt-get upgrade -y" in run
+
+
 def test_exposed_ports_documented():
     for port in re.findall(r"^EXPOSE (\d+)", read("Dockerfile"), re.MULTILINE):
         assert port in read("README.md")

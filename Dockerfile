@@ -23,9 +23,12 @@ COPY requirements.txt /tmp/requirements.txt
 
 # Install runtime dependencies and the Dropbox CLI script, create the user,
 # and clean up, in a single layer. The CLI is part of the image so it works
-# even when dropbox.com is unreachable at startup.
+# even when dropbox.com is unreachable at startup. Packages from the base
+# image are upgraded too: Ubuntu publishes security fixes before it
+# refreshes the base image.
 # hadolint ignore=DL3008
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
    curl ca-certificates gosu tzdata \
    libc6 libatomic1 libglapi-mesa \

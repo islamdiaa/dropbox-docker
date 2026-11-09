@@ -46,6 +46,9 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.4.1 (2026-11-09)
+- Security: includes Ubuntu's latest security updates (apt CVE-2026-109518)
+
 ### 1.4.0 (2026-10-20)
 - Security: root never follows symlinks the Dropbox user could plant
 - Startup no longer downloads 90 MB just to check the version, and has network timeouts
