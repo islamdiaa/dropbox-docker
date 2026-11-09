@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.1 — 2026-11-09
+
+### Changed
+
+- **`latest` is now always a release.** It used to be rebuilt from every change merged to the repository, released or not. It now changes only when a version is released, and with the monthly security rebuild.
+- New image tags: **`stable`**, the same image as `latest`, and **`development`**, built from every change before it is released. On Unraid you can pick one when installing.
+- The monthly security rebuild updates `latest`, `stable` and the newest `X.Y` tag only while there are no unreleased changes to the image; otherwise they get the updates with the next release. `development` is rebuilt every month regardless.
+
 ## 1.5.0 — 2026-11-09
 
 ### Fixes

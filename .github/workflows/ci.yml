@@ -106,10 +106,10 @@ jobs:
               esac
             fi
           fi
-          # The monthly rebuild also moves the newest release's X.Y tag, so
-          # users pinned to it get Ubuntu's security updates. Only when
+          # The monthly rebuild also moves `latest`, `stable` and the newest
+          # release's X.Y tag, so those users get Ubuntu's security updates. Only when
           # nothing that goes into the image changed since that release:
-          # X.Y must never carry unreleased code. X.Y.Z is never moved.
+          # release tags must never carry unreleased code. X.Y.Z is never moved.
           rebuild_minor=""
           if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
             released=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
@@ -127,6 +127,9 @@ jobs:
             echo "rebuild_minor=$rebuild_minor"
           } >> "$GITHUB_OUTPUT"
 
+      # Channels: `latest` and `stable` are always the newest release (moved
+      # by a release, and by the monthly rebuild while main has no unreleased
+      # image changes). `development` is every push to main.
       - name: Docker meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         id: meta
@@ -135,7 +138,9 @@ jobs:
             islamdiaa/${{ env.DOCKER_IMAGE_NAME }}
             ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=latest,enable=${{ steps.release.outputs.version != '' || steps.release.outputs.rebuild_minor != '' }}
+            type=raw,value=stable,enable=${{ steps.release.outputs.version != '' || steps.release.outputs.rebuild_minor != '' }}
+            type=raw,value=development,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
             type=raw,value=${{ steps.release.outputs.version }},priority=900,enable=${{ steps.release.outputs.version != '' }}
             type=raw,value=${{ steps.release.outputs.minor }},enable=${{ steps.release.outputs.version != '' }}
             type=raw,value=${{ steps.release.outputs.rebuild_minor }},enable=${{ steps.release.outputs.rebuild_minor != '' }}

@@ -2,6 +2,18 @@
 <Container version="2">
   <Name>Dropbox</Name>
   <Repository>islamdiaa/dropbox-docker</Repository>
+  <Branch>
+    <Tag>latest</Tag>
+    <TagDescription>The newest release. Recommended.</TagDescription>
+  </Branch>
+  <Branch>
+    <Tag>stable</Tag>
+    <TagDescription>Same image as latest: the newest release.</TagDescription>
+  </Branch>
+  <Branch>
+    <Tag>development</Tag>
+    <TagDescription>Built from every change before it is released. Tested by CI, but may contain unfinished work.</TagDescription>
+  </Branch>
   <Registry>https://hub.docker.com/r/islamdiaa/dropbox-docker</Registry>
   <Network>bridge</Network>
   <MyIP/>
@@ -46,6 +58,10 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.5.1 (2026-11-09)
+- New image tags: stable (same as latest: the newest release) and development (every change, before release)
+- latest now only changes with a release or the monthly security rebuild
+
 ### 1.5.0 (2026-11-09)
 - Fixed: every container update left an orphaned Docker volume (about 140 MB) behind
 - Fixed: starting after an update walked the whole sync folder before Dropbox started
