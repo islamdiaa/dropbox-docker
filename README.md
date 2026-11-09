@@ -139,7 +139,7 @@ scrape_configs:
       - targets: ['dropbox:8000']
 ```
 
-The endpoints have no authentication and are meant for your LAN. They never show your email or name, but they do show excluded folder names and the file named in the last sync error. Don't expose them to the internet; put them behind a reverse proxy with authentication if you need remote access.
+The endpoints have no authentication and are meant for your LAN. They never show your email or name, but they do show file and folder names: the excluded folders, the file Dropbox is currently syncing, and the file named in the last sync error. To keep them off your network, don't publish the ports, or publish them on the host only (`127.0.0.1:8001:8001`). Don't expose them to the internet; put them behind a reverse proxy with authentication if you need remote access.
 
 The image also has a Docker `HEALTHCHECK` that reports unhealthy when the daemon isn't running, whether or not monitoring is enabled.
 
@@ -186,6 +186,7 @@ All configuration is through environment variables. None are required.
 | `/opt/dropbox` | Home of the Dropbox user: config in `.dropbox`, the client in `bin`. Map it to keep everything in one place. |
 | `/opt/dropbox/.dropbox` | Account link and settings. Map at least this, or `/opt/dropbox`, to stay linked across updates. |
 | `/opt/dropbox/Dropbox` | Your synced files. |
+| `/opt/dropbox/bin` | The Dropbox client (about 150 MB). Optional: map it when you map `.dropbox` and `Dropbox` separately and want to keep the client across image updates. Otherwise it is downloaded again after each update, which needs dropbox.com to be reachable. |
 | `8001` | Status page and JSON API (with `ENABLE_MONITORING=true`) |
 | `8000` | Prometheus metrics (with `ENABLE_MONITORING=true`) |
 | `17500` | Dropbox LAN sync (optional) |

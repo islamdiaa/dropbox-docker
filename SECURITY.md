@@ -14,7 +14,8 @@ Only the latest release gets fixes. Use `latest` or the newest `X.Y.Z` tag.
 
 | Tag | Supported |
 |---|---|
-| `latest`, newest `X.Y.Z` / `X.Y` | Yes |
+| `latest`, newest `X.Y` | Yes, including the monthly rebuild with Ubuntu's security updates |
+| Newest `X.Y.Z` | Yes, but it is never rebuilt: it stays exactly as released |
 | Older version tags, dated tags (e.g. `20261001`), commit tags | No |
 
 ## What this project controls
@@ -71,12 +72,12 @@ With `ENABLE_MONITORING=true`, two HTTP servers listen on all interfaces inside 
 - Port 8001: status page, `/status` and `/health`
 - Port 8000: Prometheus `/metrics`
 
-They're **unauthenticated** and meant for a trusted LAN. They don't expose your email or name, but they do show excluded folder names and the file named in the last sync error. The status page sends a strict Content-Security-Policy, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, loads nothing from other sites, and never shows the account link URL. Don't publish these ports to the internet; use a reverse proxy with authentication if you need remote access.
+They're **unauthenticated** and meant for a trusted LAN. They don't expose your email or name, but they do show file and folder names: excluded folders, the file currently syncing, and the file named in the last sync error. The status page sends a strict Content-Security-Policy, `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, loads nothing from other sites, and never shows the account link URL. Don't publish these ports to the internet; use a reverse proxy with authentication if you need remote access.
 
 ### Supply chain and CI
 
-- Every image is built, tested end to end and scanned with Trivy (CRITICAL/HIGH with a fix available fail the build) **before** it's published. Pull requests run the same checks.
+- Every image is built, tested end to end and scanned with Trivy (CRITICAL/HIGH with a fix available fail the build) **before** it's published, and the image that is published is that same tested image, not a rebuild. Pull requests run the same checks.
 - CodeQL analyzes the Python code and the workflows; OpenSSF Scorecard checks the repository.
 - All GitHub Actions are pinned to commit SHAs, workflows have read-only permissions by default, and checkouts don't keep credentials.
-- Dependabot updates actions and Python packages weekly; the monthly build pulls the latest Ubuntu 24.04 base image.
+- Dependabot updates actions and Python packages weekly; the monthly build pulls the latest Ubuntu 24.04 base image and is published as `latest`, a dated tag and, when nothing in the image has changed since the last release, that release's `X.Y` tag.
 - Registry credentials are GitHub Actions secrets and are never used by pull request builds.

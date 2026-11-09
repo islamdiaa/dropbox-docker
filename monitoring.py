@@ -297,7 +297,9 @@ class DropboxMonitor:
         # Trigger a refresh if stale
         self.get_status(Metric.NUM_SYNCING)
 
-        # Account info (redacted for privacy — no PII in API responses)
+        # Account info: only whether an account is linked, never the
+        # email or name. (raw_status, last_error and excluded_folders
+        # below do contain file and folder names.)
         account = {}
         info = self.dropbox.query_account_info()
         if info:

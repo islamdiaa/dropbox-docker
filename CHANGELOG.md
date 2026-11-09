@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.0 — 2026-11-09
+
+### Fixes
+
+- **Updates no longer leave an orphaned Docker volume behind.** With only the config and sync folders mapped (the Unraid template), Docker kept the Dropbox client in an anonymous volume, and every container update left the old one on disk: about 140 MB each, filling `docker.img` over time. The image no longer declares that volume. Volumes left by earlier versions are not removed automatically; `docker volume prune` deletes them, along with any other unused anonymous volumes.
+- **Starting after an update no longer walks the whole sync folder.** Setting the Dropbox user's UID and GID used `usermod`, which goes through every file in the user's home, the sync folder included, and re-owns matching files. On a large account that meant minutes of disk activity before Dropbox started, and it ignored `SKIP_SET_PERMISSIONS` and `OWNERSHIP_FIX_MODE=disabled`. The IDs are now set directly.
+- **The sync folder's permissions are left alone when Dropbox can already write to it.** With ownership repair on `full`, every start reset the folder to `755`. A share that is group- or world-writable on the host (Unraid shares usually are) lost that on each restart, locking out other users of the share. The container now only changes the folder when the Dropbox user can't write to it.
+- **A status check that hangs can't stall the container.** The watchdog and the Docker health check asked Dropbox for its status with no time limit. A hung reply stopped crash detection and clean shutdown, and a slow one on a busy large account could mark a running container unhealthy. Both now give up after a few seconds.
+- Timezones such as `EST5EDT`, `PST8PDT` and `GMT0` were rejected as invalid and replaced with UTC.
+- The log warns when `DROPBOX_UID` or `DROPBOX_GID` is `0`, because the Dropbox client then runs as root.
+
+### New
+
+- Unraid template: optional **Dropbox client** path (advanced view) to keep the client across container updates, so it isn't downloaded again each time and the container starts even when dropbox.com is unreachable. `/opt/dropbox/bin` can be mapped the same way with Docker Compose.
+
+### Security
+
+- The Dropbox client is only ever downloaded over HTTPS, including after redirects.
+- **The published image is the exact image that was tested and scanned.** Publishing used to build a second time; if the build cache missed, the published layers had never been tested or scanned.
+- The monthly security rebuild now also updates the newest `X.Y` tag (when nothing in the image changed since that release), not only `latest`. `X.Y.Z` tags are never changed after release.
+- The documentation now says that the status API shows the name of the file currently syncing, and how to keep the ports off your network.
+- Release automation: a failed lookup of existing tags can no longer publish unreleased code under an already released version, and only `vX.Y.Z` tags are published as releases.
+
 ## 1.4.1 — 2026-11-09
 
 ### Security

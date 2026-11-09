@@ -34,6 +34,9 @@ echo "PASS: Sync folder is writable by the dropbox user"
 docker exec "$CONTAINER_NAME" gosu dropbox mkdir -p /opt/dropbox/Dropbox/.dropbox.cache/partial
 # A file created by root while the container is down gets fixed at startup
 docker exec "$CONTAINER_NAME" touch /opt/dropbox/Dropbox/created-by-root
+# A folder Dropbox can already write to keeps its mode: shares are often
+# group- or world-writable on the host, and resetting them locks others out.
+docker exec "$CONTAINER_NAME" chmod 2775 /opt/dropbox/Dropbox
 docker restart "$CONTAINER_NAME" > /dev/null
 # The log keeps the first run's lines; wait for the second start
 for _ in $(seq 1 60); do
@@ -52,11 +55,21 @@ if [ "$OWNER" != "99" ]; then
   exit 1
 fi
 echo "PASS: Ownership repaired at startup"
+MODE=$(docker exec "$CONTAINER_NAME" stat -c '%a' /opt/dropbox/Dropbox)
+if [ "$MODE" != "2775" ]; then
+  echo "FAIL: Writable sync folder's mode was changed from 2775 to $MODE on restart"
+  exit 1
+fi
+echo "PASS: Writable sync folder keeps its mode across restarts"
 docker rm -f "$CONTAINER_NAME" > /dev/null
 
 # With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the
 # problem reported loudly instead.
 docker volume rm "$VOLUME_NAME" > /dev/null
+# A file owned by the image's built-in dropbox UID: usermod used to re-own
+# such files across the whole sync folder when it changed the user's UID.
+IMAGE_UID=$(docker run --rm -v "$VOLUME_NAME:/opt/dropbox/Dropbox" --entrypoint bash "$IMAGE" -c \
+  'touch /opt/dropbox/Dropbox/owned-by-image-uid && chown dropbox:dropbox /opt/dropbox/Dropbox/owned-by-image-uid && id -u dropbox')
 run_container "$CONTAINER_NAME" \
   -v "$VOLUME_NAME:/opt/dropbox/Dropbox" \
   -e DROPBOX_UID=99 \
@@ -74,5 +87,11 @@ if ! docker logs "$CONTAINER_NAME" 2>&1 | grep -q "is not writable by UID 99"; t
   exit 1
 fi
 echo "PASS: OWNERSHIP_FIX_MODE=disabled leaves ownership alone and reports the problem"
+OWNER=$(docker exec "$CONTAINER_NAME" stat -c '%u' /opt/dropbox/Dropbox/owned-by-image-uid)
+if [ "$OWNER" != "$IMAGE_UID" ]; then
+  echo "FAIL: A file in the sync folder was re-owned from $IMAGE_UID to $OWNER with OWNERSHIP_FIX_MODE=disabled"
+  exit 1
+fi
+echo "PASS: Changing the dropbox user's UID does not re-own files in the sync folder"
 
 echo "=== Sync folder tests passed ==="

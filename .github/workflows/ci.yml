@@ -74,9 +74,81 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
+      # A release is a vX.Y.Z tag push, or a push to main whose CHANGELOG.md
+      # starts with a version that has no tag yet. Either way the image is
+      # also published as X.Y.Z and X.Y, and the release job tags it.
+      - name: Detect release
+        id: release
+        if: github.event_name == 'push' || github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+            # The X.Y tag is derived from this, so v1.5.0-rc1 would overwrite 1.5
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME is not vX.Y.Z; refusing to publish it as a release"
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
+            version=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
+            if [ -n "$version" ]; then
+              # Exit 0: tag exists, already released. Exit 2: no such tag.
+              # Anything else (network, outage) must not look like "no tag",
+              # or unreleased code would be published under a released version.
+              rc=0
+              git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$version" > /dev/null || rc=$?
+              case "$rc" in
+                0) version="" ;;
+                2) ;;
+                *) echo "::error::Could not check whether v$version is already released (git ls-remote exit $rc)"; exit 1 ;;
+              esac
+            fi
+          fi
+          # The monthly rebuild also moves the newest release's X.Y tag, so
+          # users pinned to it get Ubuntu's security updates. Only when
+          # nothing that goes into the image changed since that release:
+          # X.Y must never carry unreleased code. X.Y.Z is never moved.
+          rebuild_minor=""
+          if [[ "$GITHUB_EVENT_NAME" == schedule ]]; then
+            released=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
+            if [ -n "$released" ] \
+               && git fetch --quiet --depth=1 "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$released:refs/tags/v$released" \
+               && git diff --quiet "v$released" HEAD -- Dockerfile docker-entrypoint.sh healthcheck.sh monitoring.py requirements.txt webui; then
+              rebuild_minor="${released%.*}"
+            fi
+          fi
+          echo "Release version: ${version:-none}"
+          echo "Rebuilt minor tag: ${rebuild_minor:-none}"
+          {
+            echo "version=$version"
+            echo "minor=${version%.*}"
+            echo "rebuild_minor=$rebuild_minor"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Docker meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        id: meta
+        with:
+          images: |
+            islamdiaa/${{ env.DOCKER_IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
+            type=raw,value=${{ steps.release.outputs.version }},priority=900,enable=${{ steps.release.outputs.version != '' }}
+            type=raw,value=${{ steps.release.outputs.minor }},enable=${{ steps.release.outputs.version != '' }}
+            type=raw,value=${{ steps.release.outputs.rebuild_minor }},enable=${{ steps.release.outputs.rebuild_minor != '' }}
+            type=sha,enable=true,priority=100,prefix=,suffix=,format=short
+            type=schedule,pattern={{date 'YYYYMMDD'}}
+          flavor: |
+            latest=false
+
+      # The image built here is the one that gets tested, scanned and then
+      # published: no second build, so nothing untested can reach users.
       # The monthly scheduled build skips the layer cache so it picks up the
       # latest Ubuntu security updates instead of reusing old apt layers.
-      - name: Build test image
+      - name: Build image
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -87,6 +159,10 @@ jobs:
           no-cache: ${{ github.event_name == 'schedule' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          build-args: |
+            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
+            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
+            VCS_REF=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
           tags: ${{ env.TEST_IMAGE }}
 
       - name: Run E2E tests
@@ -124,59 +200,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # A release is a vX.Y.Z tag push, or a push to main whose CHANGELOG.md
-      # starts with a version that has no tag yet. Either way the image is
-      # also published as X.Y.Z and X.Y, and the release job tags it.
-      - name: Detect release
-        id: release
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=""
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
-            version=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
-            if [ -n "$version" ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2>/dev/null; then
-              version=""
-            fi
-          fi
-          echo "Release version: ${version:-none}"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "minor=${version%.*}" >> "$GITHUB_OUTPUT"
-
-      - name: Docker meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        id: meta
-        with:
-          images: |
-            islamdiaa/${{ env.DOCKER_IMAGE_NAME }}
-            ghcr.io/${{ github.repository_owner }}/${{ env.DOCKER_IMAGE_NAME }}
-          tags: |
-            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', 'main') }}
-            type=raw,value=${{ steps.release.outputs.version }},priority=900,enable=${{ steps.release.outputs.version != '' }}
-            type=raw,value=${{ steps.release.outputs.minor }},enable=${{ steps.release.outputs.version != '' }}
-            type=sha,enable=true,priority=100,prefix=,suffix=,format=short
-            type=schedule,pattern={{date 'YYYYMMDD'}}
-          flavor: |
-            latest=false
-
-      # Reuses the layers built and tested above via the build cache
-      - name: Publish image
+      - name: Publish the tested image
         if: github.event_name != 'pull_request'
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          push: true
-          context: .
-          file: Dockerfile
-          platforms: linux/amd64
-          cache-from: type=gha
-          build-args: |
-            BUILD_DATE=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.created'] }}
-            VERSION=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.version'] }}
-            VCS_REF=${{ fromJSON(steps.meta.outputs.json).labels['org.opencontainers.image.revision'] }}
-          tags: ${{ steps.meta.outputs.tags }}
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            [ -n "$tag" ] || continue
+            docker tag "$TEST_IMAGE" "$tag"
+            docker push "$tag"
+          done <<< "$TAGS"
 
   # Tag the release (unless it was a tag push) and create a GitHub release
   # whose notes are that version's CHANGELOG.md section.
