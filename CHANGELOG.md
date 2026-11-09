@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.4.2 — 2026-11-09
+
+### Fixes
+
+- **The sync folder's permissions are left alone when Dropbox can already write to it.** With ownership repair on `full`, every start reset the folder to `755`. A share that is group- or world-writable on the host (Unraid shares usually are) lost that on each restart, locking out other users of the share. The container now only changes the folder when the Dropbox user can't write to it.
+- **A status check that hangs can't stall the container.** The watchdog and the Docker health check asked Dropbox for its status with no time limit. A hung reply stopped crash detection and clean shutdown, and a slow one on a busy large account could mark a running container unhealthy. Both now give up after a few seconds.
+- Timezones such as `EST5EDT`, `PST8PDT` and `GMT0` were rejected as invalid and replaced with UTC.
+- The log warns when `DROPBOX_UID` or `DROPBOX_GID` is `0`, because the Dropbox client then runs as root.
+
+### Security
+
+- The Dropbox client is only ever downloaded over HTTPS, including after redirects.
+- Release automation: a failed lookup of existing tags can no longer publish unreleased code under an already released version, and only `vX.Y.Z` tags are published as releases.
+
 ## 1.4.1 — 2026-11-09
 
 ### Security

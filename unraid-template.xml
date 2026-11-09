@@ -46,6 +46,12 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.4.2 (2026-11-09)
+- Fixed: the sync folder was reset to 755 on every start, removing group/other write access
+- Fixed: a hung or slow Dropbox status check could stall the watchdog or mark the container unhealthy
+- Timezones like EST5EDT are accepted; warning when UID/GID is 0
+- The Dropbox client is only downloaded over HTTPS
+
 ### 1.4.1 (2026-11-09)
 - Security: includes Ubuntu's latest security updates (apt CVE-2026-109518)
 

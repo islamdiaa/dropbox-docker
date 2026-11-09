@@ -10,5 +10,7 @@ if ! pgrep -f '^/opt/dropbox/bin/dropbox-lnx[^ ]*/dropbox' > /dev/null; then
   exit 1
 fi
 
-gosu dropbox dropbox status 2>/dev/null | head -1
+# Bounded well under Docker's 10s healthcheck timeout: a busy daemon answers
+# slowly, and that must not turn a running container unhealthy.
+gosu dropbox timeout 6 dropbox status 2>/dev/null | head -1
 exit 0

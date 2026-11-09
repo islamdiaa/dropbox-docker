@@ -34,6 +34,9 @@ echo "PASS: Sync folder is writable by the dropbox user"
 docker exec "$CONTAINER_NAME" gosu dropbox mkdir -p /opt/dropbox/Dropbox/.dropbox.cache/partial
 # A file created by root while the container is down gets fixed at startup
 docker exec "$CONTAINER_NAME" touch /opt/dropbox/Dropbox/created-by-root
+# A folder Dropbox can already write to keeps its mode: shares are often
+# group- or world-writable on the host, and resetting them locks others out.
+docker exec "$CONTAINER_NAME" chmod 2775 /opt/dropbox/Dropbox
 docker restart "$CONTAINER_NAME" > /dev/null
 # The log keeps the first run's lines; wait for the second start
 for _ in $(seq 1 60); do
@@ -52,6 +55,12 @@ if [ "$OWNER" != "99" ]; then
   exit 1
 fi
 echo "PASS: Ownership repaired at startup"
+MODE=$(docker exec "$CONTAINER_NAME" stat -c '%a' /opt/dropbox/Dropbox)
+if [ "$MODE" != "2775" ]; then
+  echo "FAIL: Writable sync folder's mode was changed from 2775 to $MODE on restart"
+  exit 1
+fi
+echo "PASS: Writable sync folder keeps its mode across restarts"
 docker rm -f "$CONTAINER_NAME" > /dev/null
 
 # With OWNERSHIP_FIX_MODE=disabled the folder must be left alone, and the

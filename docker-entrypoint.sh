@@ -38,7 +38,7 @@ if [ -z "${TZ:-}" ]; then
   export TZ
 else
   # Validate TZ to prevent path traversal (e.g. ../../etc/shadow)
-  if [[ ! "${TZ}" =~ ^[A-Za-z_]+(/[A-Za-z_0-9+-]+)*$ ]]; then
+  if [[ ! "${TZ}" =~ ^[A-Za-z][A-Za-z_0-9+-]*(/[A-Za-z_0-9+-]+)*$ ]]; then
     echo "WARNING: Timezone '${TZ}' contains invalid characters, using UTC"
     export TZ="UTC"
   elif [ ! -f "/usr/share/zoneinfo/${TZ}" ]; then
@@ -72,6 +72,11 @@ fi
 if [[ ! "${DROPBOX_GID}" =~ ^[0-9]+$ ]]; then
   echo "ERROR: DROPBOX_GID '${DROPBOX_GID}' is not a valid number"
   exit 1
+fi
+
+if [[ "${DROPBOX_UID}" == "0" ]] || [[ "${DROPBOX_GID}" == "0" ]]; then
+  echo "WARNING: DROPBOX_UID/DROPBOX_GID is 0: the Dropbox client will run as root."
+  echo "WARNING: This removes the isolation between Dropbox and the rest of the container; use a non-root ID."
 fi
 
 # Look for existing group, if not found create dropbox with specified GID
@@ -153,8 +158,6 @@ echo "Ownership repair mode: ${OWNERSHIP_FIX_MODE}"
 if [[ -L /opt/dropbox/Dropbox ]]; then
   echo "WARNING: /opt/dropbox/Dropbox is a symlink; leaving its ownership and permissions alone."
 elif [[ -d /opt/dropbox/Dropbox ]]; then
-  [[ "${OWNERSHIP_FIX_MODE}" == "full" ]] && chmod 755 /opt/dropbox/Dropbox
-
   # Docker creates a missing bind-mount source as root:root 755. The account
   # then links fine but the daemon can't write a single file, so nothing ever
   # syncs. Fix the top-level folder only; its contents are left alone.
@@ -162,6 +165,7 @@ elif [[ -d /opt/dropbox/Dropbox ]]; then
     case "${OWNERSHIP_FIX_MODE}" in
       full)
         chown "${DROPBOX_UID}:${DROPBOX_GID}" /opt/dropbox/Dropbox
+        chmod u+rwx /opt/dropbox/Dropbox
         echo "Sync folder was not writable by UID ${DROPBOX_UID}; changed its owner to ${DROPBOX_UID}:${DROPBOX_GID}"
         ;;
       group-only)
@@ -287,7 +291,7 @@ installed_version() {
 download_client() {
   set -o pipefail
   mkdir -p "${DROPBOX_BIN}.new"
-  curl -fsS --connect-timeout 15 --speed-limit 10240 --speed-time 60 --max-time 1800 "$1" \
+  curl -fsS --proto '=https' --proto-redir '=https' --connect-timeout 15 --speed-limit 10240 --speed-time 60 --max-time 1800 "$1" \
     | tar xzf - -C "${DROPBOX_BIN}.new" --strip-components=1 --no-same-owner
 }
 
@@ -296,7 +300,7 @@ if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "${Current}" == "Not installed" ]];
   echo "Checking for latest Dropbox version..."
   # The download link redirects to a versioned tarball: read the redirect
   # target instead of downloading the whole client just to learn its version.
-  DL=$(curl -fsS --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' \
+  DL=$(curl -fsS --proto '=https' --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' \
          "https://www.dropbox.com/download?plat=lnx.x86_64" 2>/dev/null) || DL=""
   Latest=$(echo "$DL" | grep -oP 'x86_64-\K[0-9]+\.[0-9]+\.[0-9]+' || true)
 
@@ -520,7 +524,9 @@ while true; do
         report_sync_folders
         SYNC_FOLDERS_REPORTED=true
       fi
-      STATUS=$(gosu dropbox dropbox status 2>/dev/null || true)
+      # Bounded like the status page's calls: a CLI that never returns
+      # would stop crash detection and the shutdown handler.
+      STATUS=$(gosu dropbox timeout 15 dropbox status 2>/dev/null || true)
       # The CLI gives up after 5s when the daemon is busy (e.g. indexing a
       # large account). That's normal, so only report it if it lasts.
       if [[ "${STATUS}" == "Dropbox isn't responding!" ]]; then

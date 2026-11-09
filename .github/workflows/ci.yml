@@ -136,10 +136,24 @@ jobs:
           version=""
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             version="${GITHUB_REF_NAME#v}"
+            # The X.Y tag is derived from this, so v1.5.0-rc1 would overwrite 1.5
+            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Tag $GITHUB_REF_NAME is not vX.Y.Z; refusing to publish it as a release"
+              exit 1
+            fi
           elif [[ "$GITHUB_REF" == refs/heads/main ]]; then
             version=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
-            if [ -n "$version" ] && gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/v$version" --silent 2>/dev/null; then
-              version=""
+            if [ -n "$version" ]; then
+              # Exit 0: tag exists, already released. Exit 2: no such tag.
+              # Anything else (network, outage) must not look like "no tag",
+              # or unreleased code would be published under a released version.
+              rc=0
+              git ls-remote --exit-code --tags "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$version" > /dev/null || rc=$?
+              case "$rc" in
+                0) version="" ;;
+                2) ;;
+                *) echo "::error::Could not check whether v$version is already released (git ls-remote exit $rc)"; exit 1 ;;
+              esac
             fi
           fi
           echo "Release version: ${version:-none}"
