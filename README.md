@@ -5,7 +5,7 @@
 [![Docker Pulls](https://img.shields.io/docker/pulls/islamdiaa/dropbox-docker?v=2)](https://hub.docker.com/r/islamdiaa/dropbox-docker)
 [![Docker Image](https://img.shields.io/docker/image-size/islamdiaa/dropbox-docker/latest)](https://hub.docker.com/r/islamdiaa/dropbox-docker)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/islamdiaa/dropbox-docker/badge)](https://scorecard.dev/viewer/?uri=github.com/islamdiaa/dropbox-docker)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Run the official Dropbox client on your server, NAS or homelab, in Docker. It's built for unattended use, including accounts with a million files or more: it supervises and restarts the daemon, shuts down cleanly, fixes the permission problems that usually stop Dropbox from syncing in a container, and tells you in plain words when something is wrong.
 
@@ -361,4 +361,4 @@ Originally inspired by [otherguy/docker-dropbox](https://github.com/otherguy/doc
 
 ## License
 
-MIT. See [LICENSE.md](LICENSE.md).
+MIT. See [LICENSE](LICENSE).
