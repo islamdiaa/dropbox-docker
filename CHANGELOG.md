@@ -6,6 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 
+- **Unraid: the WebUI entry appears for everyone.** Containers installed before the status page existed had no WebUI entry in the Docker tab's menu, because their saved template has an empty WebUI field. The image now carries the address itself. The page needs monitoring enabled and port 8001 mapped, which the template does by default.
 - The status page shows the Dropbox icon in its header and browser tab, and links to the project on GitHub, the issue tracker and the author's site.
 
 ## 1.5.1 — 2026-11-09

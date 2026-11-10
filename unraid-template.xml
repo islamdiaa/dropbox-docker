@@ -59,6 +59,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <Requires/>
   <Changes>
 ### 1.5.2 (2026-11-10)
+- The WebUI entry now also appears for containers installed from an older template
 - Status page: icon in the header and browser tab, links to the project and its author
 
 ### 1.5.1 (2026-11-09)

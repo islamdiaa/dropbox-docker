@@ -65,6 +65,10 @@ LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.source="https://github.com/islamdiaa/dropbox-docker"
 LABEL org.opencontainers.image.revision="${VCS_REF}"
 LABEL org.opencontainers.image.licenses="MIT"
+# Unraid shows a WebUI entry for the container from this label. New installs
+# get it from the template; this covers installs whose saved template
+# predates the status page and has an empty WebUI field.
+LABEL net.unraid.docker.webui="http://[IP]:[PORT:8001]/"
 
 # Shown at startup, so logs posted in issues identify the image
 ENV IMAGE_VERSION="${VERSION}"
