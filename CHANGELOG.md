@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.5.2 — 2026-11-10
+
+### Changed
+
+- The status page shows the Dropbox icon in its header and browser tab, and links to the project on GitHub, the issue tracker and the author's site.
+
 ## 1.5.1 — 2026-11-09
 
 ### Changed

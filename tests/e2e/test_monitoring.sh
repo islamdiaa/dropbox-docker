@@ -60,6 +60,7 @@ if ! echo "$PAGE" | grep -q '<script src="app.js"'; then
 fi
 fetch 8001/app.js > /dev/null
 fetch 8001/style.css > /dev/null
+fetch 8001/icon.png > /dev/null
 echo "PASS: Status page and assets served"
 
 METRICS=$(fetch 8000/metrics)
