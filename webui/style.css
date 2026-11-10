@@ -55,7 +55,8 @@ header {
   gap: 1rem;
 }
 
-h1 { margin: 0; font-size: 1.6rem; }
+h1 { display: flex; align-items: center; gap: 0.6rem; margin: 0; font-size: 1.6rem; }
+h1 img { display: block; }
 
 .pill {
   padding: 0.25rem 0.75rem;
@@ -127,6 +128,19 @@ footer {
   font-size: 0.85rem;
 }
 footer a { color: inherit; }
+
+.credit {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.credit p { margin: 0 0 0.5rem; }
+.credit strong { color: var(--text); }
+.credit nav { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; }
+.credit a { color: var(--busy); text-decoration: none; }
+.credit a:hover, .credit a:focus-visible { text-decoration: underline; }
 
 @media (max-width: 30rem) {
   .counts { gap: 0.5rem; }

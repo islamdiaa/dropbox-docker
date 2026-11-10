@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Dropbox status</title>
+  <link rel="icon" type="image/png" href="icon.png">
   <link rel="stylesheet" href="style.css">
   <script src="app.js" defer></script>
 </head>
 <body>
   <main>
     <header>
-      <h1>Dropbox</h1>
+      <h1><img src="icon.png" alt="" width="34" height="29">Dropbox</h1>
       <span id="state" class="pill">Loading…</span>
     </header>
     <p id="raw" class="raw"></p>
@@ -44,8 +45,20 @@
     <footer>
       <span id="updated"></span>
       <a href="status">JSON</a>
-      <a href="https://github.com/islamdiaa/dropbox-docker">dropbox-docker</a>
     </footer>
+
+    <aside class="credit">
+      <p>
+        <strong>dropbox-docker</strong> is free and open source, made by
+        <a href="https://itayar.com" target="_blank" rel="noopener">Islam ElTayar</a>.
+      </p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/islamdiaa/dropbox-docker" target="_blank" rel="noopener">Star on GitHub</a>
+        <a href="https://github.com/islamdiaa/dropbox-docker/issues" target="_blank" rel="noopener">Report a problem</a>
+        <a href="https://github.com/islamdiaa" target="_blank" rel="noopener">@islamdiaa</a>
+        <a href="https://itayar.com" target="_blank" rel="noopener">itayar.com</a>
+      </nav>
+    </aside>
   </main>
 </body>
 </html>

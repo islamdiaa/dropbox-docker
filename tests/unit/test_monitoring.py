@@ -321,7 +321,8 @@ class TestStatusServer:
         assert b'<script src="app.js"' in body
 
     def test_static_assets(self, server):
-        for path, kind in (("/app.js", "text/javascript"), ("/style.css", "text/css")):
+        for path, kind in (("/app.js", "text/javascript"), ("/style.css", "text/css"),
+                           ("/icon.png", "image/png")):
             code, headers, body = self._get(server + path)
             assert code == 200
             assert headers["Content-Type"].startswith(kind)
