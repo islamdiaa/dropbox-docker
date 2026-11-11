@@ -1,7 +1,6 @@
 import subprocess
 import re
 import os
-import pytest
 
 
 class TestVersionParsing:
