@@ -17,4 +17,6 @@ def clear_prometheus_registry():
         try:
             REGISTRY.unregister(collector)
         except Exception:
+            # Best-effort cleanup: a collector registered under several names
+            # is already gone after the first unregister.
             pass
