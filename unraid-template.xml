@@ -58,6 +58,9 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.6.0 (2026-11-13)
+- New setting "Dropbox client version" (DROPBOX_VERSION): keep a specific Dropbox client instead of the latest, e.g. to go back to the previous one if a new Dropbox release causes problems
+
 ### 1.5.2 (2026-11-10)
 - The WebUI entry now also appears for containers installed from an older template
 - Status page: icon in the header and browser tab, links to the project and its author
@@ -106,6 +109,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <Config Name="Timezone" Target="TZ" Default="America/New_York" Mode="" Description="Container timezone." Type="Variable" Display="always" Required="false" Mask="false">America/New_York</Config>
   <Config Name="Skip permissions" Target="SKIP_SET_PERMISSIONS" Default="true" Mode="" Description="Skip recursive chown on startup. Recommended for large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="Startup timeout" Target="DROPBOX_STARTUP_TIMEOUT" Default="600" Mode="" Description="Seconds to wait for daemon initialization. Increase for very large accounts." Type="Variable" Display="advanced" Required="false" Mask="false">600</Config>
+  <Config Name="Dropbox client version" Target="DROPBOX_VERSION" Default="" Mode="" Description="Leave empty for the latest Dropbox client. To keep an earlier client, e.g. when a new Dropbox release misbehaves, enter its version, e.g. 276.4.5325." Type="Variable" Display="advanced" Required="false" Mask="false"/>
   <Config Name="Max restarts" Target="DROPBOX_MAX_RESTARTS" Default="20" Mode="" Description="How many times to restart the daemon on crash before giving up." Type="Variable" Display="advanced" Required="false" Mask="false">20</Config>
   <Config Name="Polling interval" Target="POLLING_INTERVAL" Default="30" Mode="" Description="Seconds between status checks." Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
   <Config Name="Ownership repair" Target="OWNERSHIP_FIX_MODE" Default="full" Mode="" Description="full: chown files in the sync folder not owned by User ID. group-only: only set their group. disabled: never change ownership." Type="Variable" Display="advanced" Required="false" Mask="false">full</Config>

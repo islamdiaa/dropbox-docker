@@ -161,6 +161,7 @@ All configuration is through environment variables. None are required.
 |---|---|---|
 | `SKIP_SET_PERMISSIONS` | `true` | When `true`, skips the recursive `chown` of `/opt/dropbox` at startup. Turn it off only if you need everything re-owned: it takes a long time on large folders. |
 | `DROPBOX_SKIP_UPDATE` | _(unset)_ | Set to anything to keep the installed Dropbox client instead of downloading the latest on start. |
+| `DROPBOX_VERSION` | _(unset)_ | Install and keep this Dropbox client version, e.g. `276.4.5325`, instead of the latest. Use it to go back to an earlier client when a new Dropbox release causes problems; remove it to follow the latest again. Overrides `DROPBOX_SKIP_UPDATE`. Going back to an older client can mean linking the account again. |
 | `POLLING_INTERVAL` | `5` | Seconds between `dropbox status` checks. Status is logged only when it changes. |
 | `OWNERSHIP_FIX_MODE` | `full` | How the container repairs ownership in the sync folder. `full`: files not owned by `DROPBOX_UID` are changed to `DROPBOX_UID:DROPBOX_GID`. `group-only`: only the group is set to `DROPBOX_GID`; each file keeps its owner. `disabled`: ownership and permissions in the sync folder are never changed. |
 | `OWNERSHIP_FIX_INTERVAL` | `86400` | Ownership is repaired at startup, whenever Dropbox reports a file it can't sync, and every this many seconds as a safety net (minimum 60). Each pass walks the whole sync folder in the background at idle CPU and disk priority. |
@@ -317,7 +318,7 @@ Run one container per account, each with its own config and sync folder.
 | `development` | Every change as soon as it is merged, before it is released. Tested by CI, but may contain unfinished work. |
 
 **How do I update?**
-Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` is set. Your account stays linked as long as the config volume is kept.
+Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` or `DROPBOX_VERSION` is set. Your account stays linked as long as the config volume is kept.
 
 **How do I unlink or switch accounts?**
 Stop the container, delete the contents of the config folder (`/opt/dropbox/.dropbox`), start it again and link with the new account. Also remove the old device under Security in your Dropbox account settings.
