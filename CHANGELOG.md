@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.0 — 2026-11-13
+
+### Added
+
+- **Choose the Dropbox client version.** The container installs the latest Dropbox client every time it starts. When a new Dropbox release misbehaves, there was no way back. The new `DROPBOX_VERSION` setting ("Dropbox client version" on Unraid) installs and keeps the version you name, for example `276.4.5325`; leave it empty to follow the latest again. Going back to an older client can mean linking your account again.
+
 ## 1.5.2 — 2026-11-10
 
 ### Changed

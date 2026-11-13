@@ -301,19 +301,46 @@ download_client() {
     | tar xzf - -C "${DROPBOX_BIN}.new" --strip-components=1 --no-same-owner
 }
 
+# DROPBOX_VERSION installs and keeps one client version, e.g. to go back to
+# the previous one when a new Dropbox release misbehaves.
+DROPBOX_VERSION="${DROPBOX_VERSION:-}"
+if [[ "${DROPBOX_VERSION,,}" == "latest" ]]; then
+  DROPBOX_VERSION=""
+fi
+if [[ -n "${DROPBOX_VERSION}" ]] && ! [[ "${DROPBOX_VERSION}" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}$ ]]; then
+  echo "ERROR: DROPBOX_VERSION='${DROPBOX_VERSION}' is not a Dropbox client version."
+  echo "ERROR: Use the form 276.4.5325, or leave it empty for the latest version."
+  exit 1
+fi
+
 Current=$(installed_version)
-if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "${Current}" == "Not installed" ]]; then
-  echo "Checking for latest Dropbox version..."
-  # The download link redirects to a versioned tarball: read the redirect
-  # target instead of downloading the whole client just to learn its version.
-  DL=$(curl -fsS --proto '=https' --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' \
-         "https://www.dropbox.com/download?plat=lnx.x86_64" 2>/dev/null) || DL=""
-  Latest=$(echo "$DL" | grep -oP 'x86_64-\K[0-9]+\.[0-9]+\.[0-9]+' || true)
+if [[ -n "${DROPBOX_VERSION}" ]]; then
+  echo "Dropbox version pinned by DROPBOX_VERSION: ${DROPBOX_VERSION}"
+  if [[ -n "${DROPBOX_SKIP_UPDATE:-}" ]]; then
+    echo "NOTE: DROPBOX_SKIP_UPDATE is ignored while DROPBOX_VERSION is set."
+  fi
+fi
+if [[ -n "${DROPBOX_VERSION}" ]] || [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "${Current}" == "Not installed" ]]; then
+  if [[ -n "${DROPBOX_VERSION}" ]]; then
+    Latest="${DROPBOX_VERSION}"
+    DL="https://edge.dropboxstatic.com/dbx-releng/client/dropbox-lnx.x86_64-${DROPBOX_VERSION}.tar.gz"
+  else
+    echo "Checking for latest Dropbox version..."
+    # The download link redirects to a versioned tarball: read the redirect
+    # target instead of downloading the whole client just to learn its version.
+    DL=$(curl -fsS --proto '=https' --connect-timeout 15 --max-time 30 -o /dev/null -w '%{redirect_url}' \
+           "https://www.dropbox.com/download?plat=lnx.x86_64" 2>/dev/null) || DL=""
+    Latest=$(echo "$DL" | grep -oP 'x86_64-\K[0-9]+\.[0-9]+\.[0-9]+' || true)
+  fi
 
   if [[ -z "$Latest" ]]; then
     echo "WARNING: Could not determine the latest Dropbox version. Skipping update."
   else
-    echo "Latest   : $Latest"
+    if [[ -n "${DROPBOX_VERSION}" ]]; then
+      echo "Wanted   : $Latest"
+    else
+      echo "Latest   : $Latest"
+    fi
     echo "Installed: $Current"
 
     if [[ "$Current" == "$Latest" ]]; then
@@ -348,6 +375,9 @@ if [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "${Current}" == "Not installed" ]];
         fi
         echo "Dropbox updated to v$Latest"
       else
+        if [[ -n "${DROPBOX_VERSION}" ]]; then
+          echo "WARNING: Download of Dropbox $Latest failed. Check that DROPBOX_VERSION names a released version."
+        fi
         echo "WARNING: Download of Dropbox $Latest failed. Keeping installed version ($Current)."
         rm -rf "${DROPBOX_BIN}.new"
       fi
