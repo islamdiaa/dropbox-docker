@@ -284,6 +284,17 @@ docker exec dropbox gosu dropbox dropbox status
 
 **`Dropbox isn't responding!`** The command-line tool gives up after 5 seconds, which happens while the daemon is busy, e.g. indexing a large account. It isn't an error by itself; the log only warns if it lasts 5 minutes.
 
+**It says "Welcome" but `dropbox status` stays on `Starting...`.** Right after linking, `Starting...` is normal for a while, longer for large accounts. If it's still there after an hour and the daemon is idle (`docker exec dropbox ps -eo pcpu,args` shows little CPU), the link hasn't finished, so a restart asks you to link again. Things to check:
+
+- On a Dropbox Basic (free) account, at most three devices can be linked. Remove unused ones under [Devices](https://www.dropbox.com/account/security).
+- Syncing needs more Dropbox servers than linking does, so a firewall, DNS blocker or IDS can let the link through and still block the rest. This shows which servers the container can reach (any number is fine, `000` means blocked):
+
+  ```bash
+  docker exec dropbox bash -c 'for h in www.dropbox.com client.dropbox.com d.dropbox.com bolt.dropbox.com api.dropboxapi.com content.dropboxapi.com dl.dropboxusercontent.com; do printf "%-26s " "$h"; curl -s -o /dev/null -w "%{http_code}\n" --max-time 10 "https://$h/"; done'
+  ```
+
+- Try the previous Dropbox client with `DROPBOX_VERSION`, or link a different account. If another account works, the problem is on the account's side.
+
 **Dropbox asks to be linked again after a restart.** Make sure the config (`/opt/dropbox/.dropbox`, or `/opt/dropbox`) is on a persistent volume, and on Unraid on a direct path rather than `/mnt/user` (the log warns about this). Since 1.2.0, `docker stop` shuts the daemon down cleanly; older images could kill it mid-write when `POLLING_INTERVAL` was longer than Docker's 10-second stop timeout.
 
 **Several Dropbox processes / new link URLs keep appearing.** This was [#11](https://github.com/islamdiaa/dropbox-docker/issues/11), fixed in 1.2.0. Update the image.

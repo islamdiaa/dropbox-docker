@@ -58,7 +58,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
-### 1.6.0 (2026-11-13)
+### 1.6.0 (2026-11-16)
 - New setting "Dropbox client version" (DROPBOX_VERSION): keep a specific Dropbox client instead of the latest, e.g. to go back to the previous one if a new Dropbox release causes problems
 
 ### 1.5.2 (2026-11-10)
