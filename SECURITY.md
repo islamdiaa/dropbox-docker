@@ -47,6 +47,7 @@ Mitigations:
 - Downloads use HTTPS with certificate verification and time out instead of hanging.
 - The daemon runs as an unprivileged user (via `gosu`), limiting what a compromised client could do.
 - `DROPBOX_SKIP_UPDATE` keeps the installed client instead of downloading a new one.
+- `DROPBOX_VERSION` installs one specific client version, downloaded over HTTPS from Dropbox's own release server (`edge.dropboxstatic.com`). Only version numbers are accepted, so it cannot point the download anywhere else.
 
 ### Container privileges
 

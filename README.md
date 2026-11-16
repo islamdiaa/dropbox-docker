@@ -161,6 +161,7 @@ All configuration is through environment variables. None are required.
 |---|---|---|
 | `SKIP_SET_PERMISSIONS` | `true` | When `true`, skips the recursive `chown` of `/opt/dropbox` at startup. Turn it off only if you need everything re-owned: it takes a long time on large folders. |
 | `DROPBOX_SKIP_UPDATE` | _(unset)_ | Set to anything to keep the installed Dropbox client instead of downloading the latest on start. |
+| `DROPBOX_VERSION` | _(unset)_ | Install and keep this Dropbox client version, e.g. `276.4.5325`, instead of the latest. Use it to go back to an earlier client when a new Dropbox release causes problems; remove it to follow the latest again. Overrides `DROPBOX_SKIP_UPDATE`. Going back to an older client can mean linking the account again. |
 | `POLLING_INTERVAL` | `5` | Seconds between `dropbox status` checks. Status is logged only when it changes. |
 | `OWNERSHIP_FIX_MODE` | `full` | How the container repairs ownership in the sync folder. `full`: files not owned by `DROPBOX_UID` are changed to `DROPBOX_UID:DROPBOX_GID`. `group-only`: only the group is set to `DROPBOX_GID`; each file keeps its owner. `disabled`: ownership and permissions in the sync folder are never changed. |
 | `OWNERSHIP_FIX_INTERVAL` | `86400` | Ownership is repaired at startup, whenever Dropbox reports a file it can't sync, and every this many seconds as a safety net (minimum 60). Each pass walks the whole sync folder in the background at idle CPU and disk priority. |
@@ -186,7 +187,7 @@ All configuration is through environment variables. None are required.
 | `/opt/dropbox` | Home of the Dropbox user: config in `.dropbox`, the client in `bin`. Map it to keep everything in one place. |
 | `/opt/dropbox/.dropbox` | Account link and settings. Map at least this, or `/opt/dropbox`, to stay linked across updates. |
 | `/opt/dropbox/Dropbox` | Your synced files. |
-| `/opt/dropbox/bin` | The Dropbox client (about 150 MB). Optional: map it when you map `.dropbox` and `Dropbox` separately and want to keep the client across image updates. Otherwise it is downloaded again after each update, which needs dropbox.com to be reachable. |
+| `/opt/dropbox/bin` | The Dropbox client (about 150 MB). Optional: map it to an empty folder used only for the client when you map `.dropbox` and `Dropbox` separately and want to keep the client across image updates. Otherwise it is downloaded again after each update, which needs dropbox.com to be reachable. A folder that already holds other files is refused. |
 | `8001` | Status page and JSON API (with `ENABLE_MONITORING=true`) |
 | `8000` | Prometheus metrics (with `ENABLE_MONITORING=true`) |
 | `17500` | Dropbox LAN sync (optional) |
@@ -283,6 +284,17 @@ docker exec dropbox gosu dropbox dropbox status
 
 **`Dropbox isn't responding!`** The command-line tool gives up after 5 seconds, which happens while the daemon is busy, e.g. indexing a large account. It isn't an error by itself; the log only warns if it lasts 5 minutes.
 
+**It says "Welcome" but `dropbox status` stays on `Starting...`.** Right after linking, `Starting...` is normal for a while, longer for large accounts. If it's still there after an hour and the daemon is idle (`docker exec dropbox ps -eo pcpu,args` shows little CPU), the link hasn't finished, so a restart asks you to link again. Things to check:
+
+- On a Dropbox Basic (free) account, at most three devices can be linked. Remove unused ones under [Devices](https://www.dropbox.com/account/security).
+- Syncing needs more Dropbox servers than linking does, so a firewall, DNS blocker or IDS can let the link through and still block the rest. This shows which servers the container can reach (any number is fine, `000` means blocked):
+
+  ```bash
+  docker exec dropbox bash -c 'for h in www.dropbox.com client.dropbox.com d.dropbox.com bolt.dropbox.com api.dropboxapi.com content.dropboxapi.com dl.dropboxusercontent.com; do printf "%-26s " "$h"; curl -s -o /dev/null -w "%{http_code}\n" --max-time 10 "https://$h/"; done'
+  ```
+
+- Try the previous Dropbox client with `DROPBOX_VERSION`, or link a different account. If another account works, the problem is on the account's side.
+
 **Dropbox asks to be linked again after a restart.** Make sure the config (`/opt/dropbox/.dropbox`, or `/opt/dropbox`) is on a persistent volume, and on Unraid on a direct path rather than `/mnt/user` (the log warns about this). Since 1.2.0, `docker stop` shuts the daemon down cleanly; older images could kill it mid-write when `POLLING_INTERVAL` was longer than Docker's 10-second stop timeout.
 
 **Several Dropbox processes / new link URLs keep appearing.** This was [#11](https://github.com/islamdiaa/dropbox-docker/issues/11), fixed in 1.2.0. Update the image.
@@ -312,12 +324,12 @@ Run one container per account, each with its own config and sync folder.
 |---|---|
 | `latest` | The newest release. The default, and right for almost everyone. |
 | `stable` | The same image as `latest`. |
-| `X.Y` (e.g. `1.5`) | The newest release in that series, including monthly security rebuilds. |
+| `X.Y` (e.g. `1.5`) | The newest release in that series. The newest series also gets the monthly security rebuilds. |
 | `X.Y.Z` (e.g. `1.5.1`) | Exactly that release. Never changes, so it gets no security rebuilds. |
 | `development` | Every change as soon as it is merged, before it is released. Tested by CI, but may contain unfinished work. |
 
 **How do I update?**
-Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` is set. Your account stays linked as long as the config volume is kept.
+Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` or `DROPBOX_VERSION` is set. Your account stays linked as long as the config volume is kept.
 
 **How do I unlink or switch accounts?**
 Stop the container, delete the contents of the config folder (`/opt/dropbox/.dropbox`), start it again and link with the new account. Also remove the old device under Security in your Dropbox account settings.

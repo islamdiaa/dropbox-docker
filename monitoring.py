@@ -116,6 +116,7 @@ class DropboxInterface:
                 with open(info_path) as f:
                     return json.load(f)
         except Exception:
+            # Missing or half-written while Dropbox links: report "not linked".
             pass
         return None
 
@@ -131,6 +132,7 @@ class DropboxInterface:
                 # First line is header like "Excluded:"
                 return [l.strip() for l in lines[1:] if l.strip()] if len(lines) > 1 else []
         except Exception:
+            # CLI timed out or the daemon isn't up yet: the caller keeps the last list.
             pass
         return None
 
@@ -157,6 +159,7 @@ class DropboxInterface:
                 with open(version_path) as f:
                     return f.read().strip()
         except Exception:
+            # Client not installed (yet): the version is reported as unknown.
             pass
         return None
 
@@ -481,6 +484,7 @@ class StatusHandler(BaseHTTPRequestHandler):
         try:
             self.wfile.write(data)
         except BrokenPipeError:
+            # The browser went away mid-response; nothing to do.
             pass
 
     def log_message(self, format, *args):

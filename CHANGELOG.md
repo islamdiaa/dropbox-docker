@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.0 — 2026-11-16
+
+### Added
+
+- **Choose the Dropbox client version.** The container installs the latest Dropbox client every time it starts. When a new Dropbox release misbehaves, there was no way back. The new `DROPBOX_VERSION` setting ("Dropbox client version" on Unraid) installs and keeps the version you name, for example `276.4.5325`; leave it empty to follow the latest again. Going back to an older client can mean linking your account again.
+
+### Fixes
+
+- **A mapped "Dropbox client" folder can no longer be emptied by mistake.** Every client update deleted everything in the folder mapped to `/opt/dropbox/bin`, so pointing that setting at a folder with other data, such as the config folder, deleted it. The container now refuses to start when that folder holds other files and no Dropbox client, and an update replaces only the client's own files.
+- With only the client folder mapped, Dropbox's own updater was no longer blocked after a container update, so the client could update itself outside the folder the container watches. The block is now restored on every start.
+- The Dropbox Business warning no longer mentions an `/opt/dropbox` volume, which 1.5.0 removed: team folder files are lost when the container is recreated unless `/opt/dropbox` is mapped.
+- `docker stop` during a stuck status check is handled before Docker's 10-second timeout.
+
+### Documentation
+
+- Troubleshooting for an account that says "Welcome" but stays on `Starting...`: the Basic plan's device limit, a check for which Dropbox servers the container can reach, and how to tell an account problem from a container one.
+
 ## 1.5.2 — 2026-11-10
 
 ### Changed
