@@ -187,7 +187,7 @@ All configuration is through environment variables. None are required.
 | `/opt/dropbox` | Home of the Dropbox user: config in `.dropbox`, the client in `bin`. Map it to keep everything in one place. |
 | `/opt/dropbox/.dropbox` | Account link and settings. Map at least this, or `/opt/dropbox`, to stay linked across updates. |
 | `/opt/dropbox/Dropbox` | Your synced files. |
-| `/opt/dropbox/bin` | The Dropbox client (about 150 MB). Optional: map it when you map `.dropbox` and `Dropbox` separately and want to keep the client across image updates. Otherwise it is downloaded again after each update, which needs dropbox.com to be reachable. |
+| `/opt/dropbox/bin` | The Dropbox client (about 150 MB). Optional: map it to an empty folder used only for the client when you map `.dropbox` and `Dropbox` separately and want to keep the client across image updates. Otherwise it is downloaded again after each update, which needs dropbox.com to be reachable. A folder that already holds other files is refused. |
 | `8001` | Status page and JSON API (with `ENABLE_MONITORING=true`) |
 | `8000` | Prometheus metrics (with `ENABLE_MONITORING=true`) |
 | `17500` | Dropbox LAN sync (optional) |
@@ -324,7 +324,7 @@ Run one container per account, each with its own config and sync folder.
 |---|---|
 | `latest` | The newest release. The default, and right for almost everyone. |
 | `stable` | The same image as `latest`. |
-| `X.Y` (e.g. `1.5`) | The newest release in that series, including monthly security rebuilds. |
+| `X.Y` (e.g. `1.5`) | The newest release in that series. The newest series also gets the monthly security rebuilds. |
 | `X.Y.Z` (e.g. `1.5.1`) | Exactly that release. Never changes, so it gets no security rebuilds. |
 | `development` | Every change as soon as it is merged, before it is released. Tested by CI, but may contain unfinished work. |
 

@@ -135,6 +135,20 @@ if [[ "$(id -u dropbox 2>/dev/null)" != "${DROPBOX_UID}" ]] || [[ "$(id -g dropb
   exit 1
 fi
 
+# /opt/dropbox/bin can be mapped to keep the client across image updates.
+# It is chowned and gets the client unpacked into it, so refuse a folder
+# that holds other files and no client, e.g. a config folder mapped there
+# by mistake.
+if mountpoint -q /opt/dropbox/bin && [[ ! -e /opt/dropbox/bin/VERSION ]]; then
+  OTHER_FILES=$(find /opt/dropbox/bin -mindepth 1 -maxdepth 1 \
+                  ! -name dropboxd ! -name 'dropbox-lnx.*' -printf '%f\n' | head -3)
+  if [[ -n "${OTHER_FILES}" ]]; then
+    echo "ERROR: The Dropbox client folder (/opt/dropbox/bin) holds other files: ${OTHER_FILES//$'\n'/, }"
+    echo "ERROR: Map an empty folder used only for the client, e.g. /mnt/user/appdata/dropbox-client."
+    exit 1
+  fi
+fi
+
 # --- Permissions ---
 SKIP_PERMS=$(echo "${SKIP_SET_PERMISSIONS:-true}" | tr '[:upper:]' '[:lower:]' | tr -d " ")
 if [[ "$SKIP_PERMS" == "true" ]]; then
@@ -277,6 +291,17 @@ lock_analytics() {
 # primary path and the nested .dropbox/.dropbox path the daemon creates.
 lock_analytics
 
+# Dropbox updates itself into ~/.dropbox-dist and then runs from there,
+# outside /opt/dropbox/bin where the supervisor and health check look for
+# it. A root-owned, unwritable folder in its place stops that. Checked on
+# every start: with only the client folder mapped, the client survives a
+# container update but /opt/dropbox doesn't.
+if [[ -L /opt/dropbox/.dropbox-dist ]] || [[ "$(stat -c %u /opt/dropbox/.dropbox-dist 2>/dev/null)" != "0" ]]; then
+  gosu dropbox rm -rf -- /opt/dropbox/.dropbox-dist 2>/dev/null || true
+  (umask 0777 && mkdir -- /opt/dropbox/.dropbox-dist) 2>/dev/null || true
+fi
+chmod o-w,g-w /tmp
+
 # --- Update Dropbox ---
 # The client lives in /opt/dropbox/bin. A new version is unpacked next to it
 # and swapped in with renames, so a failed or interrupted update never
@@ -346,13 +371,6 @@ if [[ -n "${DROPBOX_VERSION}" ]] || [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "$
     if [[ "$Current" == "$Latest" ]]; then
       echo "Dropbox is up-to-date"
     else
-      # Prevent Dropbox self-updates
-      if [[ "$Current" == "Not installed" ]] && [[ ! -d /opt/dropbox/.dropbox-dist ]]; then
-        install -dm0 /opt/dropbox/.dropbox-dist
-        chmod o-w /tmp
-        chmod g-w /tmp
-      fi
-
       echo "Downloading Dropbox $Latest..."
       download_client "$DL" &
       if wait $! \
@@ -362,8 +380,9 @@ if [[ -n "${DROPBOX_VERSION}" ]] || [[ -z "${DROPBOX_SKIP_UPDATE:-}" ]] || [[ "$
         chmod -R u-s,g-s "${DROPBOX_BIN}.new"
         chown -R "${DROPBOX_UID}:${DROPBOX_GID}" "${DROPBOX_BIN}.new"
         if mountpoint -q "${DROPBOX_BIN}"; then
-          # A mounted bin folder can't be renamed; replace its contents
-          find "${DROPBOX_BIN}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          # A mounted bin folder can't be renamed; replace the client's files
+          find "${DROPBOX_BIN}" -mindepth 1 -maxdepth 1 \
+            \( -name VERSION -o -name dropboxd -o -name 'dropbox-lnx.*' \) -exec rm -rf {} +
           mv "${DROPBOX_BIN}.new"/* "${DROPBOX_BIN}"/
           rm -rf "${DROPBOX_BIN}.new"
         else
@@ -456,9 +475,9 @@ for kind, account in info.items():
     team = " (team)" if account.get("is_team") else ""
     print(f"Dropbox {kind} account{team} syncs to: {path}")
     if path != "/opt/dropbox/Dropbox":
-        print(f"WARNING: {path} is not the mapped sync folder /opt/dropbox/Dropbox, so these files")
-        print("WARNING: are stored in the /opt/dropbox volume. To keep them on your own storage,")
-        print("WARNING: map /opt/dropbox itself to a host folder (see README: Dropbox Business).")
+        print(f"WARNING: {path} is not the mapped sync folder /opt/dropbox/Dropbox. Unless /opt/dropbox")
+        print("WARNING: itself is mapped to a host folder, these files are inside the container and are")
+        print("WARNING: lost when it is recreated, e.g. on image updates (see README: Dropbox Business).")
 EOF
 }
 
@@ -561,8 +580,9 @@ while true; do
         SYNC_FOLDERS_REPORTED=true
       fi
       # Bounded like the status page's calls: a CLI that never returns
-      # would stop crash detection and the shutdown handler.
-      STATUS=$(gosu dropbox timeout 15 dropbox status 2>/dev/null || true)
+      # would stop crash detection and the shutdown handler. Under 10s, so a
+      # `docker stop` arriving meanwhile is handled before Docker's timeout.
+      STATUS=$(gosu dropbox timeout 8 dropbox status 2>/dev/null || true)
       # The CLI gives up after 5s when the daemon is busy (e.g. indexing a
       # large account). That's normal, so only report it if it lasts.
       if [[ "${STATUS}" == "Dropbox isn't responding!" ]]; then
