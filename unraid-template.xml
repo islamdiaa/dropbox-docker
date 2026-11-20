@@ -58,6 +58,9 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.6.1 (2026-11-20)
+- The image's Python package is checked against its published checksum when the image is built; nothing changes in use
+
 ### 1.6.0 (2026-11-16)
 - New setting "Dropbox client version" (DROPBOX_VERSION): keep a specific Dropbox client instead of the latest, e.g. to go back to the previous one if a new Dropbox release causes problems
 - The "Dropbox client" folder must be empty or hold only the client; a folder with other files is no longer emptied

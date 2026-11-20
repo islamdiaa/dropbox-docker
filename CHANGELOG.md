@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.1 — 2026-11-20
+
+### Security
+
+- The image installs its one Python package (`prometheus_client`, used by the status page and metrics) only if it matches the checksum of the release on PyPI. A tampered or corrupted download now fails the build instead of reaching the image. Nothing changes in use.
+
 ## 1.6.0 — 2026-11-16
 
 ### Added
