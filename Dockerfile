@@ -37,7 +37,7 @@ RUN apt-get update \
    libxcb-present0 libxcb-sync1 \
    libxshmfence1 libxxf86vm1 \
    python3 python3-gpg python3-pip \
- && pip3 install --no-cache-dir --break-system-packages -r /tmp/requirements.txt \
+ && pip3 install --no-cache-dir --break-system-packages --require-hashes -r /tmp/requirements.txt \
  && rm /tmp/requirements.txt \
  && curl -fsSL --retry 3 --max-time 120 -o /opt/dropbox.py "https://www.dropbox.com/download?dl=packages/dropbox.py" \
  && python3 -m py_compile /opt/dropbox.py && rm -rf /opt/__pycache__ \
