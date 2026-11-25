@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.2 — 2026-11-25
+
+### Fixes
+
+- **Only one Dropbox client runs after Dropbox restarts itself.** Dropbox sometimes starts a new copy of itself and ends the old one, for example after an unlink. The container took this for a crash and started a second client next to the new one, so two clients shared one config folder and the log showed two different link URLs in turn (#31). The container now follows the new client and doesn't count it as a restart.
+
 ## 1.6.1 — 2026-11-20
 
 ### Security
