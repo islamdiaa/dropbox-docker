@@ -58,6 +58,9 @@ By Islam ElTayar — https://itayar.com</Overview>
   <DonateLink/>
   <Requires/>
   <Changes>
+### 1.6.2 (2026-11-25)
+- When Dropbox restarts itself, e.g. after an unlink, the container no longer starts a second client next to it
+
 ### 1.6.1 (2026-11-20)
 - The image's Python package is checked against its published checksum when the image is built; nothing changes in use
 
