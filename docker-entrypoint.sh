@@ -445,12 +445,47 @@ pause() {
   wait $! || true
 }
 
+# The client sometimes restarts itself, e.g. with /unlinksuccess after an
+# unlink: it starts a new client process and the old one exits. That looks
+# like a crash, and starting another client next to the new one leaves two
+# fighting over one config folder (#31). Prints the PID of a running client
+# of the dropbox user, if any. pgrep reads only /proc/*/cmdline and status,
+# which need no capabilities (unlike /proc/PID/exe, which needs ptrace).
+running_client() {
+  pgrep -n -u "${DROPBOX_UID}" -f '^/opt/dropbox/bin/dropbox-lnx[^ ]*/dropbox'
+}
+
+# Once the daemon has exited, follow the client that replaced it, if any.
+# Waits up to $1 seconds for it to appear.
+follow_client() {
+  local pid waited=0
+  until pid=$(running_client); do
+    [[ ${waited} -lt $1 ]] || return 1
+    pause 1
+    waited=$((waited + 1))
+  done
+  DROPBOX_PID="${pid}"
+  echo "Dropbox restarted itself (new PID: ${DROPBOX_PID}); following the new process."
+}
+
 # --- Signal Handler ---
 cleanup() {
+  # The client may have restarted itself since the last check
+  daemon_running || follow_client 0 || true
   echo "Received shutdown signal. Stopping Dropbox daemon (PID: ${DROPBOX_PID})..."
   signal_daemon TERM
   wait "${DROPBOX_PID}" 2>/dev/null || true
-  echo "Dropbox daemon stopped."
+  # `wait` returns at once for a client that restarted itself, as this shell
+  # didn't start it. Poll for that one, within Docker's 10s stop timeout.
+  for _ in {1..16}; do
+    daemon_running || break
+    sleep 0.5
+  done
+  if daemon_running; then
+    echo "WARNING: Dropbox daemon did not stop in time."
+  else
+    echo "Dropbox daemon stopped."
+  fi
   exit 0
 }
 trap cleanup SIGTERM SIGINT SIGHUP SIGQUIT
@@ -540,7 +575,7 @@ while [[ $STARTUP_ELAPSED -lt ${DROPBOX_STARTUP_TIMEOUT} ]]; do
     echo "Dropbox daemon is ready (took ${STARTUP_ELAPSED}s)"
     break
   fi
-  if ! daemon_running; then
+  if ! daemon_running && ! follow_client 5; then
     echo "WARNING: Dropbox daemon exited during startup"
     break
   fi
@@ -624,6 +659,10 @@ while true; do
     /usr/bin/find /tmp/ -maxdepth 1 -type d -name 'dropbox*' -mtime +1 -exec rm -rf {} \; 2>/dev/null || true
 
     pause "${POLLING_INTERVAL}"
+  elif follow_client 5; then
+    # The client restarted itself: not a crash
+    LAST_STATUS=""
+    UNRESPONSIVE_SINCE=""
   else
     # Daemon crashed
     RESTART_COUNT=$((RESTART_COUNT + 1))
@@ -633,6 +672,13 @@ while true; do
     fi
     echo "WARNING: Dropbox daemon exited. Restart attempt ${RESTART_COUNT}/${DROPBOX_MAX_RESTARTS} in ${DROPBOX_RESTART_DELAY}s..."
     pause "${DROPBOX_RESTART_DELAY}"
+
+    # Never remove a running client's sockets and PID file: follow a client
+    # that started during the delay instead of starting another one.
+    if follow_client 0; then
+      RESTART_COUNT=$((RESTART_COUNT - 1))
+      continue
+    fi
 
     # Clean stale sockets before restart
     rm -f /opt/dropbox/.dropbox/command_socket \
