@@ -297,7 +297,7 @@ docker exec dropbox gosu dropbox dropbox status
 
 **Dropbox asks to be linked again after a restart.** Make sure the config (`/opt/dropbox/.dropbox`, or `/opt/dropbox`) is on a persistent volume, and on Unraid on a direct path rather than `/mnt/user` (the log warns about this). Since 1.2.0, `docker stop` shuts the daemon down cleanly; older images could kill it mid-write when `POLLING_INTERVAL` was longer than Docker's 10-second stop timeout.
 
-**Several Dropbox processes / new link URLs keep appearing.** This was [#11](https://github.com/islamdiaa/dropbox-docker/issues/11), fixed in 1.2.0. Update the image.
+**Several Dropbox processes / new link URLs keep appearing.** Two causes are fixed: [#11](https://github.com/islamdiaa/dropbox-docker/issues/11) in 1.2.0, and in 1.6.2 a second client started when Dropbox restarted itself, e.g. after an unlink ([#31](https://github.com/islamdiaa/dropbox-docker/issues/31)). Update the image. After a link that failed this way, stop the container, remove it under [Devices](https://www.dropbox.com/account/security) and empty the config folder before linking again.
 
 **Reporting a problem.** The first log line shows the image version, e.g. `dropbox-docker 1.3.0 (revision c50898d)`. Include it, and the log from the start, in [a bug report](https://github.com/islamdiaa/dropbox-docker/issues/new/choose). Remove the `cli_link_nonce` link first.
 
