@@ -30,6 +30,25 @@ if ! docker exec "$CONTAINER_NAME" gosu dropbox touch /opt/dropbox/Dropbox/.writ
 fi
 echo "PASS: Sync folder is writable by the dropbox user"
 
+# #31: on its first link the client renames an unrecognised ~/Dropbox to
+# "Dropbox (Old)". The mapped folder is a mount point, so that fails with
+# EBUSY and the client hangs; the preloaded library must report it as done.
+RENAME='import os, sys; os.rename("/opt/dropbox/Dropbox", sys.argv[1])'
+PRELOAD=LD_PRELOAD=/usr/local/lib/dropbox-docker/keep_sync_folder.so
+if ! docker exec "$CONTAINER_NAME" gosu dropbox env "$PRELOAD" python3 -c "$RENAME" "/opt/dropbox/Dropbox (Old)"; then
+  echo "FAIL: Moving the mounted sync folder aside was not reported as done"
+  exit 1
+fi
+if ! docker exec "$CONTAINER_NAME" mountpoint -q /opt/dropbox/Dropbox; then
+  echo "FAIL: The mounted sync folder is gone"
+  exit 1
+fi
+if docker exec "$CONTAINER_NAME" gosu dropbox env "$PRELOAD" python3 -c "$RENAME" /opt/dropbox/elsewhere 2>/dev/null; then
+  echo "FAIL: Another rename of the mounted sync folder was reported as done"
+  exit 1
+fi
+echo "PASS: The client keeps a mounted sync folder instead of moving it aside"
+
 # Dropbox's own cache in the sync folder must survive a restart
 docker exec "$CONTAINER_NAME" gosu dropbox mkdir -p /opt/dropbox/Dropbox/.dropbox.cache/partial
 # A file created by root while the container is down gets fixed at startup

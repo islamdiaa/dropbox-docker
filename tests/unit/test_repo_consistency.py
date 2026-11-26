@@ -87,7 +87,9 @@ def test_changelog_versions_are_semver_and_descending():
 def test_base_image_packages_are_upgraded():
     # Ubuntu ships security fixes before it rebuilds the base image; without
     # an upgrade the scan failed on apt 2.8.3 (CVE-2026-109518) for days.
-    run = read("Dockerfile").split("\nRUN apt-get update", 1)[1].split("\n\n", 1)[0]
+    # Only the final stage ships; build stages don't need the upgrade
+    final_stage = read("Dockerfile").split("\nFROM ")[-1]
+    run = final_stage.split("\nRUN apt-get update", 1)[1].split("\n\n", 1)[0]
     assert "apt-get upgrade -y" in run
 
 
