@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.6.3 — 2026-11-26
+
+### Fixes
+
+- **Linking no longer hangs on "Starting..." with a mapped sync folder.** On its first link the Dropbox client moves an existing `Dropbox` folder it doesn't recognise aside to `Dropbox (Old)`. A folder mapped to `/opt/dropbox/Dropbox` is a mount point and can't be moved, so the client stopped right after "Welcome": it never wrote `info.json`, never synced, and asked to link again after every restart (#31). The client now keeps the mapped folder and syncs into it, files already in it included.
+
 ## 1.6.2 — 2026-11-25
 
 ### Fixes

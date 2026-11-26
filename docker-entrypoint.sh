@@ -554,8 +554,12 @@ record_restarts() {
 record_restarts 0
 
 # --- Start Dropbox ---
+# On its first link the client moves an unrecognised ~/Dropbox aside to
+# "Dropbox (Old)"; for a mapped sync folder that fails with EBUSY and the
+# client hangs on "Starting..." (#31). This library makes it keep the folder.
+KEEP_SYNC_FOLDER_LIB=/usr/local/lib/dropbox-docker/keep_sync_folder.so
 echo "Starting dropboxd ($(cat /opt/dropbox/bin/VERSION 2>/dev/null || echo 'unknown'))..."
-gosu dropbox "$@" & DROPBOX_PID="$!"
+gosu dropbox env LD_PRELOAD="${KEEP_SYNC_FOLDER_LIB}" "$@" & DROPBOX_PID="$!"
 
 # --- Start Monitoring (Optional) ---
 if [[ $(echo "${ENABLE_MONITORING:-false}" | tr '[:upper:]' '[:lower:]' | tr -d " ") == "true" ]]; then
@@ -689,7 +693,7 @@ while true; do
     # Re-lock analytics directories (daemon recreates them on crash)
     lock_analytics
 
-    gosu dropbox "$@" & DROPBOX_PID="$!"
+    gosu dropbox env LD_PRELOAD="${KEEP_SYNC_FOLDER_LIB}" "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
     TOTAL_RESTARTS=$((TOTAL_RESTARTS + 1))
     LAST_RESTART=${SECONDS}
