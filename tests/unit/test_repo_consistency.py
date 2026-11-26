@@ -93,6 +93,24 @@ def test_base_image_packages_are_upgraded():
     assert "apt-get upgrade -y" in run
 
 
+def test_monthly_rebuild_checks_every_image_input():
+    # The monthly rebuild moves `latest` and `stable` only when nothing that
+    # goes into the image changed since the last release. A file the
+    # Dockerfile copies but the check doesn't list could ship unreleased.
+    check = re.search(r'git diff --quiet "v\$released" HEAD -- ([^;]+);', read(".github/workflows/ci.yml"))
+    assert check, "the monthly rebuild's check was not found in ci.yml"
+    checked = set(check.group(1).split())
+    copied = set()
+    for line in re.findall(r"^COPY\s+(.+)$", read("Dockerfile"), re.MULTILINE):
+        if "--from=" in line:
+            continue
+        args = [a for a in line.split() if not a.startswith("--")]
+        copied.update(a.rstrip("/") for a in args[:-1])
+    assert "Dockerfile" in checked
+    assert copied, "no COPY sources found in the Dockerfile"
+    assert copied <= checked, f"not checked by the monthly rebuild: {sorted(copied - checked)}"
+
+
 def test_exposed_ports_documented():
     for port in re.findall(r"^EXPOSE (\d+)", read("Dockerfile"), re.MULTILINE):
         assert port in read("README.md")

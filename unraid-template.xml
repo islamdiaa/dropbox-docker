@@ -59,7 +59,7 @@ By Islam ElTayar — https://itayar.com</Overview>
   <Requires/>
   <Changes>
 ### 1.6.3 (2026-11-26)
-- Linking no longer hangs on "Starting..." with a mapped Dropbox folder; files already in the folder are kept and synced
+- The first link works with a mapped, empty Dropbox folder. Before, linking stopped after "Welcome" (#31)
 
 ### 1.6.2 (2026-11-25)
 - When Dropbox restarts itself, e.g. after an unlink, the container no longer starts a second client next to it

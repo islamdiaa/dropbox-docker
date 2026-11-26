@@ -94,6 +94,8 @@ docker logs -f dropbox
 
 Open the link in a browser and sign in. Syncing starts right away, and the link is remembered across restarts and updates. Don't share that link: anyone who opens it can link their own Dropbox account to your server.
 
+For the first link, the sync folder should be empty. Dropbox moves a folder it doesn't recognise out of the way, and a mapped folder can't be moved, so the container keeps an empty one in place (since 1.6.3) but won't take over one that has files in it: syncing it would upload those files into the account. If the log warns that the sync folder has files in it, stop the container, move them out, start it again and link, then move them back once Dropbox is up to date. A folder from an earlier install of the same account still has its `.dropbox` file and is used as it is.
+
 ## Status page and monitoring
 
 Set `ENABLE_MONITORING=true` (the Unraid template does this) and the container serves:
@@ -286,6 +288,7 @@ docker exec dropbox gosu dropbox dropbox status
 
 **It says "Welcome" but `dropbox status` stays on `Starting...`.** Right after linking, `Starting...` is normal for a while, longer for large accounts. If it's still there after an hour and the daemon is idle (`docker exec dropbox ps -eo pcpu,args` shows little CPU), the link hasn't finished, so a restart asks you to link again. Things to check:
 
+- Update the image. Before 1.6.3, the first link always stopped here when the sync folder was mapped ([#31](https://github.com/islamdiaa/dropbox-docker/issues/31)). If the log shows `ERROR: Dropbox wants to move /opt/dropbox/Dropbox aside`, the folder has files in it: see [Link your account](#link-your-account).
 - On a Dropbox Basic (free) account, at most three devices can be linked. Remove unused ones under [Devices](https://www.dropbox.com/account/security).
 - Syncing needs more Dropbox servers than linking does, so a firewall, DNS blocker or IDS can let the link through and still block the rest. This shows which servers the container can reach (any number is fine, `000` means blocked):
 
@@ -332,7 +335,7 @@ Run one container per account, each with its own config and sync folder.
 Pull the new image and recreate the container (on Unraid: **apply update**). The Dropbox client itself updates every time the container starts, unless `DROPBOX_SKIP_UPDATE` or `DROPBOX_VERSION` is set. Your account stays linked as long as the config volume is kept.
 
 **How do I unlink or switch accounts?**
-Stop the container, delete the contents of the config folder (`/opt/dropbox/.dropbox`), start it again and link with the new account. Also remove the old device under Security in your Dropbox account settings.
+Stop the container and delete the contents of the config folder (`/opt/dropbox/.dropbox`). For a different account, also empty the sync folder or map a new one: the container won't link an account into a folder that holds another account's files. Start it again and link. Also remove the old device under Security in your Dropbox account settings.
 
 ## How it works
 

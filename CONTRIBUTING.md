@@ -15,6 +15,7 @@ Security issues should be reported privately; see [SECURITY.md](SECURITY.md).
 | `Dockerfile` | The image |
 | `docker-entrypoint.sh` | PID 1: settings, permissions, Dropbox download, supervision, shutdown |
 | `healthcheck.sh` | Docker `HEALTHCHECK` |
+| `keep_sync_folder.c` | Library preloaded into the client so the first link works with a mapped, empty sync folder (#31) |
 | `monitoring.py` | Status page, JSON API and Prometheus metrics (`ENABLE_MONITORING=true`) |
 | `webui/` | The status page's HTML, CSS and JavaScript (no build step, no external resources) |
 | `unraid-template.xml` | Unraid template |

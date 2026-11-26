@@ -88,3 +88,12 @@ class TestEntrypointRegressions:
             code = line.split("#", 1)[0]
             if code.strip().startswith(("curl ", "DL=$(curl")) or " curl " in code:
                 assert "--max-time" in code, f"curl without --max-time: {line.strip()}"
+
+    def test_every_client_start_preloads_keep_sync_folder(self):
+        # Without the library, a restarted client would hang again on a first
+        # link into a mapped sync folder (#31).
+        starts = [line.strip() for line in self._script().splitlines()
+                  if re.match(r'\s*gosu dropbox .*"\$@" & DROPBOX_PID=', line)]
+        assert len(starts) >= 2, starts
+        for line in starts:
+            assert line.startswith('gosu dropbox env LD_PRELOAD="${KEEP_SYNC_FOLDER_LIB}" "$@"'), line
