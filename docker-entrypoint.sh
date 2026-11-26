@@ -554,8 +554,22 @@ record_restarts() {
 record_restarts 0
 
 # --- Start Dropbox ---
+# On its first link the client moves a ~/Dropbox that isn't the account's
+# Dropbox folder aside to "Dropbox (Old)". A mapped sync folder is a mount
+# point and can't be moved, so the client hung on "Starting..." (#31). This
+# library lets the client keep the mounted folder when it's empty. A folder
+# with files in it still can't be linked, so say so before the link is opened.
+KEEP_SYNC_FOLDER_LIB=/usr/local/lib/keep_sync_folder.so
+if [[ ! -e /opt/dropbox/.dropbox/info.json ]] && [[ ! -e /opt/dropbox/.dropbox/host.db ]] \
+  && [[ ! -e /opt/dropbox/Dropbox/.dropbox ]] && mountpoint -q /opt/dropbox/Dropbox \
+  && [[ -n "$(find /opt/dropbox/Dropbox -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
+  echo "WARNING: The sync folder has files in it, but this container isn't linked to Dropbox yet."
+  echo "WARNING: Linking would stop after \"Welcome\": Dropbox moves such a folder aside, and a mapped"
+  echo "WARNING: folder can't be moved. Before you open the link, stop the container, move the files"
+  echo "WARNING: out of the sync folder and start it again. Move them back once Dropbox is up to date."
+fi
 echo "Starting dropboxd ($(cat /opt/dropbox/bin/VERSION 2>/dev/null || echo 'unknown'))..."
-gosu dropbox "$@" & DROPBOX_PID="$!"
+gosu dropbox env LD_PRELOAD="${KEEP_SYNC_FOLDER_LIB}" "$@" & DROPBOX_PID="$!"
 
 # --- Start Monitoring (Optional) ---
 if [[ $(echo "${ENABLE_MONITORING:-false}" | tr '[:upper:]' '[:lower:]' | tr -d " ") == "true" ]]; then
@@ -689,7 +703,7 @@ while true; do
     # Re-lock analytics directories (daemon recreates them on crash)
     lock_analytics
 
-    gosu dropbox "$@" & DROPBOX_PID="$!"
+    gosu dropbox env LD_PRELOAD="${KEEP_SYNC_FOLDER_LIB}" "$@" & DROPBOX_PID="$!"
     echo "Restarted Dropbox daemon (PID: ${DROPBOX_PID})"
     TOTAL_RESTARTS=$((TOTAL_RESTARTS + 1))
     LAST_RESTART=${SECONDS}

@@ -1,3 +1,14 @@
+# Builds the small library that lets the client keep a mounted sync folder
+# (see keep_sync_folder.c). Only the .so reaches the image, not the compiler.
+FROM ubuntu:24.04 AS keep-sync-folder
+# hadolint ignore=DL3008
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends gcc libc6-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY keep_sync_folder.c /src/
+RUN gcc -shared -fPIC -O2 -Wall -Wextra -Werror -D_FORTIFY_SOURCE=2 -fstack-protector-strong \
+    -Wl,-z,relro,-z,now -o /src/keep_sync_folder.so /src/keep_sync_folder.c -ldl
+
 FROM ubuntu:24.04
 
 LABEL maintainer="Islam ElTayar <https://itayar.com>"
@@ -86,6 +97,10 @@ ENV OWNERSHIP_FIX_INTERVAL=86400
 
 COPY --chmod=755 docker-entrypoint.sh healthcheck.sh /
 COPY --chmod=644 monitoring.py /
+# A full file path in an existing folder: copied to a new folder instead,
+# --chmod would also give that folder mode 644, and the dropbox user
+# couldn't load the library from it.
+COPY --from=keep-sync-folder --chmod=644 /src/keep_sync_folder.so /usr/local/lib/keep_sync_folder.so
 COPY webui /webui
 
 HEALTHCHECK --interval=60s --timeout=10s --start-period=120s --retries=3 \

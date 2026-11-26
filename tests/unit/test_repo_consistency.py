@@ -87,8 +87,28 @@ def test_changelog_versions_are_semver_and_descending():
 def test_base_image_packages_are_upgraded():
     # Ubuntu ships security fixes before it rebuilds the base image; without
     # an upgrade the scan failed on apt 2.8.3 (CVE-2026-109518) for days.
-    run = read("Dockerfile").split("\nRUN apt-get update", 1)[1].split("\n\n", 1)[0]
+    # Only the final stage ships; build stages don't need the upgrade
+    final_stage = read("Dockerfile").split("\nFROM ")[-1]
+    run = final_stage.split("\nRUN apt-get update", 1)[1].split("\n\n", 1)[0]
     assert "apt-get upgrade -y" in run
+
+
+def test_monthly_rebuild_checks_every_image_input():
+    # The monthly rebuild moves `latest` and `stable` only when nothing that
+    # goes into the image changed since the last release. A file the
+    # Dockerfile copies but the check doesn't list could ship unreleased.
+    check = re.search(r'git diff --quiet "v\$released" HEAD -- ([^;]+);', read(".github/workflows/ci.yml"))
+    assert check, "the monthly rebuild's check was not found in ci.yml"
+    checked = set(check.group(1).split())
+    copied = set()
+    for line in re.findall(r"^COPY\s+(.+)$", read("Dockerfile"), re.MULTILINE):
+        if "--from=" in line:
+            continue
+        args = [a for a in line.split() if not a.startswith("--")]
+        copied.update(a.rstrip("/") for a in args[:-1])
+    assert "Dockerfile" in checked
+    assert copied, "no COPY sources found in the Dockerfile"
+    assert copied <= checked, f"not checked by the monthly rebuild: {sorted(copied - checked)}"
 
 
 def test_exposed_ports_documented():

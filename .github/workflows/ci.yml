@@ -115,7 +115,7 @@ jobs:
             released=$(grep -m1 -oP '^## \K[0-9]+\.[0-9]+\.[0-9]+(?= — )' CHANGELOG.md || true)
             if [ -n "$released" ] \
                && git fetch --quiet --depth=1 "https://github.com/$GITHUB_REPOSITORY" "refs/tags/v$released:refs/tags/v$released" \
-               && git diff --quiet "v$released" HEAD -- Dockerfile docker-entrypoint.sh healthcheck.sh monitoring.py requirements.txt webui; then
+               && git diff --quiet "v$released" HEAD -- Dockerfile docker-entrypoint.sh healthcheck.sh keep_sync_folder.c monitoring.py requirements.txt webui; then
               rebuild_minor="${released%.*}"
             fi
           fi
